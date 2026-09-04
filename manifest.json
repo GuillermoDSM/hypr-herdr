@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "guillermodsm.hypr-herdr",
+  "name": "Hypr Herdr",
+  "version": "0.1.0",
+  "author": "guillermodsm",
+  "description": "Herdr spaces as native Omarchy workspaces.",
+  "kinds": ["panel"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Panel.qml"
+  }
+}
