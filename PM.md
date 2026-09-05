@@ -48,33 +48,37 @@ Estados: `[x]` hecho, `[ ]` pendiente.
 
 ## Sprint 1 - Spike de Slot Leasing
 
+Estado: **completado, NO-GO**. Ver `SLOT_LEASING_SPIKE.md`.
+
 ### US-101 - Validar `change_id`
 
-- [ ] Verificar disponibilidad de `hl.dsp.workspace.change_id`.
-- [ ] Cambiar IDs entre workspaces positivos de prueba.
-- [ ] Confirmar que nombre, ventanas y layout sobreviven.
-- [ ] Probar tiled, floating, grouped, fullscreen y workspace vacío.
-- [ ] Confirmar una sola transición visual al adquirir y cambiar space.
+- [x] Verificar disponibilidad de `hl.dsp.workspace.change_id`.
+- [x] Cambiar IDs entre workspaces positivos de prueba.
+- [x] Confirmar que nombre, ventanas y layout sobreviven.
+- [x] Probar tiled, floating, grouped, fullscreen y workspace vacío.
+- [x] Evaluar transición al adquirir y cambiar space.
 
 **Technical notes:** usar únicamente slots de prueba fuera de `1..10`. No ejecutar el spike sobre workspaces de trabajo. Registrar cada ID original antes de mutarlo y restaurarlo al finalizar.
 
 ### US-102 - Validar integración nativa
 
-- [ ] Confirmar barra estándar y `SUPER+1..9` sin cambios.
-- [ ] Probar navegación relativa `e+1` y `SUPER+TAB` con IDs altos.
-- [ ] Probar reglas de Hyprland dirigidas a un número.
-- [ ] Probar un monitor y varios monitores.
+- [x] Confirmar barra estándar y foco numérico sin cambios.
+- [x] Probar navegación relativa `e+1` y `SUPER+TAB` con IDs altos.
+- [x] Probar reglas de Hyprland dirigidas a un número.
+- [x] Probar monitor físico más monitor virtual.
 
 ### US-103 - Validar fallos
 
-- [ ] Interrumpir cada paso de acquire, switch y release.
-- [ ] Reiniciar `omarchy-shell` durante un arriendo.
-- [ ] Demostrar recuperación sin cargar el plugin.
-- [ ] Documentar resultado y decisión go/no-go.
+- [x] Interrumpir pasos de rename, parking, switch y release.
+- [x] Reconstruir el arriendo desde un proceso Quickshell nuevo.
+- [x] Demostrar recuperación sin cargar el plugin.
+- [x] Documentar resultado y decisión go/no-go.
 
 **Technical notes:** el spike es un gate. Si hay flicker inevitable, pérdida de estado o recuperación insegura, detener Slot Leasing y diseñar el fallback de router más widget propio descrito en `PRD.md`.
 
 ## Sprint 2 - Lease Coordinator
+
+Estado: **bloqueado por el no-go del Sprint 1**. No iniciar hasta actualizar la arquitectura.
 
 ### US-201 - Identidad interna
 

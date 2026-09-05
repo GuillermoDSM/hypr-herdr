@@ -49,7 +49,7 @@ This repository is an early implementation. The existing vertical slice provides
 - A themed layer-shell sidebar for spaces, tabs, panes, and agent states.
 - Omarchy IPC methods for navigation and diagnostics.
 
-Workspace management is being migrated from direct named-workspace navigation to Workspace Slot Leasing. Leasing, release, crash recovery, and terminal ownership are not production-ready yet. Automatic terminal creation and `--takeover` remain disabled until safe ownership and recovery checks are implemented.
+The Workspace Slot Leasing spike is complete and produced a no-go for the architecture as currently specified. High internal IDs interfere with relative navigation on the same monitor, and an empty parked workspace is destroyed after losing focus. See [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md). Automatic terminal creation and `--takeover` remain disabled until safe ownership and recovery checks are implemented.
 
 ## Requirements
 
@@ -62,6 +62,8 @@ Workspace management is being migrated from direct named-workspace navigation to
 The plugin must verify `change_id` support before mutating any workspace. Unsupported versions must fail without parking or renaming the current workspace.
 
 ## Required Spike
+
+Status: **completed, NO-GO**. The reproducible harness is `tests/slot-leasing-spike.sh`; results and cleanup guarantees are documented in [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
 
 Workspace Slot Leasing must pass an isolated spike before the implementation is considered stable. The spike must verify:
 
@@ -143,7 +145,8 @@ The emergency recovery command will be documented after the spike confirms the e
 ## Current Limits
 
 - Workspace Slot Leasing and release are not implemented yet.
-- The current code still contains direct named-workspace navigation that will be replaced by the lease coordinator.
+- Lease Coordinator implementation is blocked by the completed no-go spike.
+- The current code still contains direct named-workspace navigation until a replacement architecture is selected.
 - The sidebar currently targets the default output; per-output instances are pending.
 - The first leasing version supports one global slot, not one slot per monitor.
 - Pane windows are focused only when already attached with the expected app-id.

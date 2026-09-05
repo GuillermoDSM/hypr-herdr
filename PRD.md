@@ -8,6 +8,10 @@ Para Hyprland y Omarchy, el space Herdr activo es el workspace numérico arrenda
 
 Un sidebar nativo de Omarchy permite cambiar de space, inspeccionar panes y ver el estado de los agentes. Hyprland conserva el layout, tamaño y posición de las ventanas; Herdr conserva procesos, sesiones y agentes.
 
+## Estado de la arquitectura
+
+El spike de septiembre de 2026 produjo **NO-GO para Workspace Slot Leasing tal como se describe aquí**. Los IDs internos interfieren con `e+1` en el mismo monitor y un workspace vacío aparcado desaparece al perder foco. Este documento conserva el diseño evaluado, pero el Lease Coordinator no debe implementarse hasta seleccionar y documentar otra arquitectura. Evidencia: [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
+
 ## Objetivo
 
 Convertir Herdr en una capa de sesión y navegación integrada con Omarchy:
@@ -441,6 +445,8 @@ El plugin debe detectar capacidades antes de iniciar un arriendo. Si `change_id`
 
 Workspace Slot Leasing no se considera validado hasta completar un spike aislado que demuestre:
 
+**Resultado:** completado con NO-GO. Ver [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
+
 1. `change_id` conserva ventanas, layout, grupos, fullscreen y nombres renombrados.
 2. Aparcar, arrendar y enfocar produce una sola transición visible.
 3. Cambiar el space propietario del slot no muestra estados intermedios.
@@ -474,16 +480,10 @@ Además del spike, la implementación se probará con:
 
 ## Decisiones cerradas
 
-- Workspace Slot Leasing reemplaza la navegación directa a workspaces nombrados.
 - Cada space, no cada pane, corresponde a un workspace completo de Hyprland.
-- Los spaces inactivos usan IDs positivos altos y nombres estables `herdr:*`.
-- El space activo adquiere temporalmente el ID numérico de entrada.
-- El workspace original se aparca y puede restaurarse de forma determinista.
 - Los panes son ventanas dentro del workspace del space.
-- El plugin cambia IDs de workspaces; no transporta sus ventanas.
 - Hyprland define y conserva la geometría.
-- La barra y los bindings numéricos estándar permanecen intactos.
 - El sidebar se implementa en Omarchy y usa el estado real de Herdr.
 - La sincronización usa sockets y eventos, no polling.
-- La primera versión admite un solo arriendo global.
 - La integración usa un plugin oficial de Omarchy sin extensiones nativas adicionales.
+- Workspace Slot Leasing queda bloqueado por el no-go del spike.
