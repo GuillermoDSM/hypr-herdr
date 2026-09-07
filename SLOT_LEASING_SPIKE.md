@@ -2,61 +2,64 @@
 
 ## Resultado
 
-**NO-GO para la arquitectura descrita en el PRD.** `change_id` funciona, pero hay dos bloqueos para usar home IDs altos en el monitor normal:
+**GO con workspaces vacíos desechables.** `change_id` conserva workspaces con contenido. Si el original está vacío, Hyprland puede destruirlo: el lease conserva su identidad y `release` lo recrea.
 
-1. `e+1` y `SUPER+TAB` incluyen los workspaces internos del mismo monitor.
-2. Un workspace vacío aparcado desaparece al perder foco, eliminando su metadata de recuperación.
-
-Un monitor virtual aísla los IDs internos de la navegación relativa, pero añade infraestructura permanente y obliga a mover workspaces entre monitores. Esa variante puede cambiar geometría y no cumple la arquitectura mínima aprobada.
+No se necesitan reglas `persistent`, ventanas sentinel ni un monitor virtual permanente. La navegación relativa puede visitar los IDs internos en v0.1; se acepta y documenta como comportamiento nativo.
 
 ## Entorno
 
 - Hyprland `0.56.2`.
 - Omarchy `4.0.1`.
-- Un monitor físico y un output headless temporal.
-- API confirmada: `hl.dsp.workspace.change_id({ workspace, id })`.
+- Output headless temporal para aislamiento.
+- APIs confirmadas: `change_id`, `rename`, `focus` y dispatchers Lua compuestos.
 
 ## Evidencia
 
 | Prueba | Resultado |
 |---|---|
 | IDs positivos y nombres renombrados | PASS |
-| Ventanas tiled y geometría | PASS |
-| Ventana floating y geometría | PASS |
-| Grupo y fullscreen | PASS |
+| Tiled, floating, grupos, fullscreen y geometría | PASS |
 | Cambio de propietario en un dispatcher compuesto | PASS |
 | Barra estándar y foco por número | PASS |
 | Reconstrucción desde un proceso Quickshell nuevo | PASS |
-| Rollback tras rename, parking, switch y release parciales | PASS |
-| Aislamiento en monitor virtual | PASS |
-| `e+1` con IDs internos en monitor virtual | PASS |
-| `e+1` con IDs internos en monitor activo | FAIL: enfoca el ID interno |
+| Rollback de rename, parking, switch y release | PASS |
+| Original vacío desaparece sin `persistent` | PASS, esperado |
+| Lease reconstruible sin workspace aparcado | PASS |
+| Release recrea ID y nombre del original vacío | PASS |
+| Space Herdr vacío reutiliza el workspace actual | PASS |
+| `e+1` alcanza un home Herdr y `previous` regresa | PASS, aceptado |
 | Regla numérica durante el arriendo | WARN: se aplica al space Herdr |
-| Workspace original vacío | FAIL: Hyprland lo destruye al perder foco |
 
-El dispatcher compuesto aceptado por Hyprland ejecuta varios `hl.dispatch(...)` dentro de una sola llamada y termina con un único cambio de foco. No se realizó una medición frame a frame, porque el no-go ya queda determinado por navegación y recuperación.
+El segundo spike reproducible está en `tests/disposable-empty-spike.sh`. El primer harness permanece en `tests/slot-leasing-spike.sh` para validar conservación de layouts y rollback.
 
-La recarga se validó arrancando un segundo proceso Quickshell que reconstruyó propietario y workspace aparcado desde Hyprland. No se reinició el shell real para no interrumpir la sesión del usuario.
+## Estrategia validada
+
+- Un space Herdr con ventanas sobrevive naturalmente en su home ID alto.
+- El workspace original aparcado sobrevive mientras tenga ventanas.
+- Si el original desaparece por quedar vacío, no hay contenido que preservar.
+- El nombre leased del workspace Herdr guarda home ID, slot y nombre original.
+- Si `release` no encuentra el original aparcado, crea un workspace vacío con la identidad guardada.
+- Un space Herdr vacío puede reutilizar el workspace vacío actual y volver a crearse cuando sea necesario.
 
 ## Seguridad
 
-El harness `tests/slot-leasing-spike.sh`:
+Ambos harnesses:
 
-- Aborta si cualquiera de sus IDs o clases ya existe.
-- Crea todas sus ventanas en un output headless temporal.
-- Usa exclusivamente IDs mayores que `10`.
-- Instala un `trap` para cerrar solo clientes `hypr-herdr-spike-*`.
-- Desactiva su regla temporal, restaura el foco y elimina el output virtual.
-- Verifica que no queden clientes de prueba.
+- Abortan ante colisiones de IDs o clases.
+- Ejecutan ventanas solo en un output headless temporal.
+- Usan exclusivamente IDs mayores que `10`.
+- Instalan rollback para éxito, error, señal y timeout.
+- Cierran solo clientes con prefijos de spike.
+- Eliminan el output temporal y verifican que no queden residuos.
 
-Después de cada ejecución se comprobó que solo quedaban el monitor, workspaces y ventanas originales.
+No se reinició el shell real ni se modificó configuración persistente.
 
 ## Decisión
 
-No implementar el Sprint 2 de Lease Coordinator hasta elegir una alternativa:
+Continuar con Workspace Slot Leasing bajo estas reglas:
 
-1. Router de navegación y widget de workspaces propio.
-2. Variante con monitor virtual permanente, sujeta a un spike específico de geometría y lifecycle.
-3. Leasing con una regla `persistent` temporal para workspaces vacíos y reemplazo de navegación relativa.
-
-La opción 1 es la única que evita depender de workspaces ocultos y de un output artificial, aunque deja de conservar intactos el widget y todos los bindings nativos.
+1. Los workspaces vacíos son desechables y recreables.
+2. El lease guarda toda la identidad necesaria en nombres de Hyprland.
+3. No usar `persistent` ni estado privado en disco.
+4. Aceptar navegación relativa hacia home y parking IDs en v0.1.
+5. Mantener la barra y bindings numéricos sin cambios.

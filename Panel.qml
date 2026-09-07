@@ -17,7 +17,9 @@ Item {
   property string lastSpaceId: ""
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "guillermodsm.hypr-herdr"
-  readonly property string focusedWorkspaceName: Hyprland.focusedWorkspace ? String(Hyprland.focusedWorkspace.name || "") : ""
+  readonly property string focusedWorkspaceName: Hyprland.focusedWorkspace
+    ? String((Hyprland.focusedWorkspace.lastIpcObject || {}).name || Hyprland.focusedWorkspace.name || "")
+    : ""
   readonly property bool onHerdrWorkspace: spaceIdForWorkspace(focusedWorkspaceName) !== ""
   readonly property var selectedSpace: spaceById(selectedSpaceId)
   readonly property color foreground: Color.popups.text
@@ -41,32 +43,14 @@ Item {
     return null
   }
 
-  function workspaceByName(name) {
-    var values = Hyprland.workspaces.values
-    for (var i = 0; i < values.length; i++) {
-      if (String(values[i].name || "") === String(name || "")) return values[i]
-    }
-    return null
-  }
-
   function spaceIdForWorkspace(name) {
+    var leasedId = lease.spaceIdForName(name)
+    if (leasedId !== "") return leasedId
     for (var i = 0; i < client.workspaces.length; i++) {
       var id = String(client.workspaces[i].workspace_id || "")
       if (IdCodec.workspaceName(id) === String(name || "")) return id
     }
     return ""
-  }
-
-  function activateWorkspace(name) {
-    var workspace = workspaceByName(name)
-    if (workspace) {
-      workspace.activate()
-      return
-    }
-    if (Hyprland.usingLua)
-      Hyprland.dispatch("hl.dsp.focus({ workspace = \"name:" + name + "\" })")
-    else
-      Hyprland.dispatch("workspace name:" + name)
   }
 
   function tabsFor(spaceId) {
@@ -106,10 +90,7 @@ Item {
   function openSpace(id) {
     var value = String(id || "")
     if (!spaceById(value)) return "unknown space: " + value
-    selectedSpaceId = value
-    lastSpaceId = value
-    activateWorkspace(IdCodec.workspaceName(value))
-    return "ok"
+    return lease.openSpace(value)
   }
 
   function openLast() {
@@ -118,7 +99,11 @@ Item {
     if (!spaceById(target)) target = client.focusedWorkspaceId
     if (!spaceById(target) && client.workspaces.length > 0)
       target = String(client.workspaces[0].workspace_id || "")
-    return target === "" ? "no Herdr spaces" : openSpace(target)
+    return target === "" ? "no Herdr spaces" : lease.toggle(target)
+  }
+
+  function releaseLease() {
+    return lease.release()
   }
 
   function focusPane(id) {
@@ -156,7 +141,18 @@ Item {
       panes: client.panes.length,
       selectedSpaceId: selectedSpaceId,
       focusedWorkspace: focusedWorkspaceName,
-      lastSnapshotAt: client.lastSnapshotAt
+      lastSnapshotAt: client.lastSnapshotAt,
+      lease: {
+        active: lease.active,
+        busy: lease.busy,
+        recoveryRequired: lease.recoveryRequired,
+        phase: lease.phase,
+        error: lease.errorMessage,
+        slot: lease.slotId,
+        ownerSpaceId: lease.ownerSpaceId,
+        home: lease.homeId,
+        parking: lease.parkingId
+      }
     })
   }
 
@@ -172,12 +168,24 @@ Item {
   HerdrClient {
     id: client
     onSnapshotApplied: {
+      lease.reconcile()
       if (!root.spaceById(root.selectedSpaceId)) {
         root.selectedSpaceId = root.spaceById(focusedWorkspaceId)
           ? focusedWorkspaceId
           : (workspaces.length > 0 ? String(workspaces[0].workspace_id || "") : "")
       }
       root.syncFocusedWorkspace()
+    }
+  }
+
+  WorkspaceLease {
+    id: lease
+    onOperationFinished: function(operation, success, message) {
+      if (!success) return
+      if (operation !== "release") {
+        root.selectedSpaceId = ownerSpaceId
+        root.lastSpaceId = ownerSpaceId
+      }
     }
   }
 
@@ -188,6 +196,7 @@ Item {
     function openLast(): string { return root.openLast() }
     function openSpace(id: string): string { return root.openSpace(id) }
     function focusPane(id: string): string { return root.focusPane(id) }
+    function release(): string { return root.releaseLease() }
     function status(): string { return root.statusJson() }
     function reconcile(): string { client.requestSnapshot(); return "requested" }
     function close(): void { root.close() }

@@ -48,7 +48,7 @@ Estados: `[x]` hecho, `[ ]` pendiente.
 
 ## Sprint 1 - Spike de Slot Leasing
 
-Estado: **completado, NO-GO**. Ver `SLOT_LEASING_SPIKE.md`.
+Estado: **completado, GO con vacíos desechables**. Ver `SLOT_LEASING_SPIKE.md`.
 
 ### US-101 - Validar `change_id`
 
@@ -72,46 +72,49 @@ Estado: **completado, NO-GO**. Ver `SLOT_LEASING_SPIKE.md`.
 - [x] Interrumpir pasos de rename, parking, switch y release.
 - [x] Reconstruir el arriendo desde un proceso Quickshell nuevo.
 - [x] Demostrar recuperación sin cargar el plugin.
+- [x] Recrear un original vacío sin reglas `persistent`.
+- [x] Validar navegación relativa aceptada en v0.1.
 - [x] Documentar resultado y decisión go/no-go.
 
-**Technical notes:** el spike es un gate. Si hay flicker inevitable, pérdida de estado o recuperación insegura, detener Slot Leasing y diseñar el fallback de router más widget propio descrito en `PRD.md`.
+**Technical notes:** los workspaces vacíos son desechables. El nombre leased conserva home ID, slot y nombre original; si no existe parked al liberar, se recrea vacío.
 
 ## Sprint 2 - Lease Coordinator
 
-Estado: **bloqueado por el no-go del Sprint 1**. No iniciar hasta actualizar la arquitectura.
+Estado: **completado**.
 
 ### US-201 - Identidad interna
 
-- [ ] Asignar un home ID positivo y estable por space Herdr.
-- [ ] Detectar colisiones antes de asignar home o parking IDs.
-- [ ] Mantener nombres estables `herdr:<encoded-space-id>`.
-- [ ] Codificar nombre, slot y token del workspace aparcado.
+- [x] Asignar un home ID positivo y estable por space Herdr.
+- [x] Detectar colisiones antes de asignar home o parking IDs.
+- [x] Codificar home ID y space ID en nombres estables.
+- [x] Codificar slot y nombre original en el nombre leased.
+- [x] Reconocer un parked workspace como opcional.
 
 **Technical notes:** resolver workspaces Herdr por nombre, no por ID actual. El rango alto es reservado lógicamente, pero cada ID debe comprobarse contra el estado real de Hyprland.
 
 ### US-202 - Transacciones de leasing
 
-- [ ] Implementar acquire desde el workspace numérico actual.
-- [ ] Implementar switch del space que posee el slot.
-- [ ] Implementar migración del portal a otro slot.
-- [ ] Implementar `release()` idempotente.
-- [ ] Serializar operaciones y confirmar cada estado desde Hyprland.
+- [x] Implementar acquire desde el workspace numérico actual.
+- [x] Implementar switch del space que posee el slot.
+- [x] Implementar migración del portal a otro slot.
+- [x] Implementar `release()` idempotente.
+- [x] Serializar operaciones y confirmar cada estado desde Hyprland.
 
-**Technical notes:** permitir una sola transacción activa. Secuencia acquire: renombrar original, mover original a parking, mover Herdr al slot y enfocar. Release ejecuta el orden inverso. Nunca asignar un ID ocupado ni actualizar la selección antes de confirmación.
+**Technical notes:** permitir una sola transacción activa. Acquire aparca el original y entrega el slot a Herdr. Release restaura parked cuando existe; si desapareció vacío, recrea el slot desde la metadata leased. Nunca asignar un ID ocupado.
 
 ### US-203 - IPC de leasing
 
-- [ ] Convertir `openLast` en toggle acquire/release.
-- [ ] Hacer que `openSpace` use el slot arrendado.
-- [ ] Añadir `release` al `IpcHandler`.
-- [ ] Extender `status` con slot, propietario, home, parking y fase.
-- [ ] Eliminar navegación nombrada provisional.
+- [x] Convertir `openLast` en toggle acquire/release.
+- [x] Hacer que `openSpace` use el slot arrendado.
+- [x] Añadir `release` al `IpcHandler`.
+- [x] Extender `status` con slot, propietario, home, parking y fase.
+- [x] Eliminar navegación nombrada provisional.
 
 ### US-204 - Pruebas del coordinador
 
-- [ ] Probar acquire, switch, migrate y release.
-- [ ] Probar colisiones y solicitudes concurrentes.
-- [ ] Probar que una confirmación fallida bloquea nuevas mutaciones.
+- [x] Probar acquire, switch, migrate y release.
+- [x] Probar colisiones y solicitudes concurrentes.
+- [x] Probar que `recoveryRequired` bloquea nuevas mutaciones.
 
 ## Sprint 3 - Workspaces y terminales
 

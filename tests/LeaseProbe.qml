@@ -13,6 +13,7 @@ ShellRoot {
       attempts++
       var owner = Quickshell.env("SPIKE_OWNER_NAME")
       var parked = Quickshell.env("SPIKE_PARKED_NAME")
+      var parkedOptional = Quickshell.env("SPIKE_PARKED_OPTIONAL") === "1"
       var ownerFound = false
       var parkedFound = false
       var values = Hyprland.workspaces.values
@@ -21,7 +22,7 @@ ShellRoot {
         parkedFound = parkedFound || String(values[i].name || "") === parked
       }
 
-      if (ownerFound && parkedFound) {
+      if (ownerFound && (parkedFound || parkedOptional)) {
         console.log("LEASE_PROBE_OK", owner, parked)
         Qt.quit()
       } else if (attempts >= 20) {

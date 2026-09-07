@@ -10,7 +10,7 @@ Un sidebar nativo de Omarchy permite cambiar de space, inspeccionar panes y ver 
 
 ## Estado de la arquitectura
 
-El spike de septiembre de 2026 produjo **NO-GO para Workspace Slot Leasing tal como se describe aquí**. Los IDs internos interfieren con `e+1` en el mismo monitor y un workspace vacío aparcado desaparece al perder foco. Este documento conserva el diseño evaluado, pero el Lease Coordinator no debe implementarse hasta seleccionar y documentar otra arquitectura. Evidencia: [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
+El spike de septiembre de 2026 produjo **GO con workspaces vacíos desechables**. Los workspaces con ventanas se conservan completos; si un original vacío desaparece al perder foco, el lease guarda su identidad y `release()` lo recrea. No se usan reglas `persistent`. La navegación relativa hacia IDs internos se acepta en v0.1. Evidencia: [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
 
 ## Objetivo
 
@@ -58,12 +58,12 @@ Al liberar el arriendo, el space Herdr recupera su ID interno y el workspace ori
 Herdr server
   ├── space w1 ───────── Hyprland workspace
   │   │                    home ID: 1000000001
-  │   │                    name: herdr:dzE
+  │   │                    name: herdr:v1:1000000001:dzE
   │   ├── pane w1:p1 ─── terminal window + direct attach
   │   └── pane w1:p2 ─── terminal window + direct attach
   └── space wB ───────── Hyprland workspace
       │                    home ID: 1000000002
-      │                    name: herdr:d0I
+      │                    name: herdr:v1:1000000002:d0I
       ├── pane wB:p1 ─── terminal window + direct attach
       └── pane wB:p2 ─── terminal window + direct attach
 
@@ -75,7 +75,7 @@ Omarchy shell
 
 Example while w1 leases slot 2
   ├── original workspace 2 ── parked at an internal positive ID
-  └── space w1 ───────────── ID: 2, name: herdr:dzE
+  └── space w1 ───────────── ID: 2, name: herdr:v1:1000000001:dzE:leased:...
 ```
 
 Los IDs anteriores son ilustrativos. La implementación reservará un rango positivo alto y comprobará colisiones antes de asignarlo.
@@ -84,7 +84,7 @@ Los IDs anteriores son ilustrativos. La implementación reservará un rango posi
 
 | Herdr | Omarchy/Hyprland |
 |---|---|
-| Space | Workspace normal con nombre `herdr:<base64url(space_id)>` |
+| Space | Workspace normal con nombre `herdr:v1:<home_id>:<base64url(space_id)>` |
 | Space inactivo | Su ID interno positivo estable dentro del rango reservado |
 | Space activo | El ID numérico arrendado, conservando su nombre `herdr:*` |
 | Workspace original | Workspace aparcado con nombre de recuperación durante el arriendo |
@@ -103,14 +103,14 @@ Los IDs de Herdr son opacos. Una función reversible y segura para nombres de Hy
 Los spaces de Herdr son workspaces normales con IDs positivos altos, no `special` workspaces. Cada uno tiene:
 
 - Un `home ID` estable dentro del rango reservado.
-- Un nombre estable `herdr:<base64url(space_id)>`.
+- Un nombre estable `herdr:v1:<home_id>:<base64url(space_id)>`.
 - Sus propias ventanas, layout y estado de Hyprland.
 
 El nombre estable permite reconocer un workspace Herdr aunque su ID cambie durante un arriendo. Los workspaces internos altos no deben aparecer en la barra numérica estándar, que muestra el rango de slots configurado por Omarchy.
 
 ### Workspace original aparcado
 
-Antes de retirar el ID visible al workspace original, el plugin guarda en su nombre de recuperación:
+Antes de retirar el ID visible al workspace original, el plugin guarda en los nombres de recuperación:
 
 - El slot arrendado.
 - Su nombre anterior.
@@ -119,10 +119,11 @@ Antes de retirar el ID visible al workspace original, el plugin guarda en su nom
 Formato conceptual:
 
 ```text
-hypr-herdr:parked:<slot>:<encoded-original-name>:<transaction-token>
+hypr-herdr:v1:parked:<slot>:<encoded-original-name>:<parking-id>
+herdr:v1:<home-id>:<encoded-space-id>:leased:<slot>:<encoded-original-name>:<parking-id>
 ```
 
-El workspace se mueve después a un ID interno positivo libre. Esta marca permite reconstruir el estado sin depender exclusivamente de memoria QML o de archivos privados.
+El workspace se mueve después a un ID interno positivo libre. El workspace Herdr cambia temporalmente a un nombre leased que también incluye home ID, slot y nombre original. Si el original aparcado desaparece por quedar vacío, esa metadata permite recrearlo. No se usan reglas `persistent` ni archivos privados.
 
 ### Operación central
 
@@ -170,6 +171,7 @@ Mientras `wB` posee el slot `2`:
 - `SUPER+3` enfoca el workspace `3` sin que Hypr Herdr intercepte el binding.
 - La barra estándar marca `2` cuando `wB` está enfocado.
 - Reglas e integraciones de Hyprland observan a `wB` como workspace `2` durante el arriendo.
+- `SUPER+TAB` puede visitar home y parking IDs; este comportamiento se acepta en v0.1.
 
 Esta última propiedad es intencional, pero las reglas configuradas por número son un riesgo de compatibilidad que debe probarse y documentarse.
 
@@ -191,8 +193,8 @@ La primera versión admite un solo arriendo global. El soporte de un arriendo po
 
 1. Resolver el space Herdr que posee el slot y el workspace original aparcado.
 2. Devolver el space Herdr a su home ID.
-3. Devolver el workspace original al slot.
-4. Restaurar el nombre original.
+3. Devolver el workspace original al slot cuando todavía existe.
+4. Si desapareció vacío, recrear el slot y restaurar su nombre desde la metadata leased.
 5. Enfocar el workspace restaurado cuando la liberación sea solicitada por el usuario.
 6. Confirmar que no quedan marcas de recuperación huérfanas.
 
@@ -203,7 +205,7 @@ Deshabilitar o retirar el plugin requiere liberar primero cualquier arriendo. La
 Al iniciar o recargar, el coordinador inspecciona workspaces y nombres antes de reconciliar terminales:
 
 - Adopta workspaces `herdr:*` existentes por nombre, no por su ID actual.
-- Detecta workspaces `hypr-herdr:parked:*` y reconstruye la transacción.
+- Detecta workspaces `hypr-herdr:v1:parked:*` y reconstruye la transacción.
 - Si encuentra un arriendo completo y coherente, lo adopta.
 - Si encuentra una transacción parcial, evita nuevos cambios y presenta una acción de recuperación.
 - Nunca sobrescribe un ID ocupado ni adivina qué workspace debe destruirse.
@@ -331,7 +333,9 @@ hypr-herdr/
 ├── manifest.json
 ├── Panel.qml
 ├── HerdrClient.qml
+├── WorkspaceLease.qml
 ├── IdCodec.js
+├── LeaseCodec.js
 ├── README.md
 ├── PRD.md
 ├── LICENSE
@@ -445,7 +449,7 @@ El plugin debe detectar capacidades antes de iniciar un arriendo. Si `change_id`
 
 Workspace Slot Leasing no se considera validado hasta completar un spike aislado que demuestre:
 
-**Resultado:** completado con NO-GO. Ver [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
+**Resultado:** completado con GO para vacíos desechables. Ver [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
 
 1. `change_id` conserva ventanas, layout, grupos, fullscreen y nombres renombrados.
 2. Aparcar, arrendar y enfocar produce una sola transición visible.
@@ -486,4 +490,5 @@ Además del spike, la implementación se probará con:
 - El sidebar se implementa en Omarchy y usa el estado real de Herdr.
 - La sincronización usa sockets y eventos, no polling.
 - La integración usa un plugin oficial de Omarchy sin extensiones nativas adicionales.
-- Workspace Slot Leasing queda bloqueado por el no-go del spike.
+- Los workspaces vacíos son desechables y se recrean desde metadata leased.
+- Workspace Slot Leasing queda habilitado por el spike.

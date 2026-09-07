@@ -17,7 +17,7 @@ The complete product and recovery design is in [PRD.md](PRD.md).
 Each Herdr space owns a normal Hyprland workspace with:
 
 - A stable high positive home ID.
-- A stable `herdr:<base64url(space_id)>` name.
+- A stable `herdr:v1:<home_id>:<base64url(space_id)>` name.
 - Its terminal windows and native Hyprland layout.
 
 The active space exchanges its home ID for the leased numeric slot through Hyprland 0.56's Lua dispatcher:
@@ -37,7 +37,7 @@ This design does not replace:
 - Omarchy's standard workspace widget.
 - Hyprland or Omarchy components.
 
-Herdr IDs remain opaque and are encoded as base64url in workspace names and terminal app-ids. For example, space `w1` uses the stable name `herdr:dzE`, regardless of whether its current ID is its internal home ID or a leased slot.
+Herdr IDs remain opaque and are encoded as base64url. Space `w1` with home ID `1000000001` uses `herdr:v1:1000000001:dzE`. While leased, its name also carries the slot, original name, and parking ID so a fresh process can recover the transaction.
 
 ## Project Status
 
@@ -49,7 +49,7 @@ This repository is an early implementation. The existing vertical slice provides
 - A themed layer-shell sidebar for spaces, tabs, panes, and agent states.
 - Omarchy IPC methods for navigation and diagnostics.
 
-The Workspace Slot Leasing spike is complete and produced a no-go for the architecture as currently specified. High internal IDs interfere with relative navigation on the same monitor, and an empty parked workspace is destroyed after losing focus. See [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md). Automatic terminal creation and `--takeover` remain disabled until safe ownership and recovery checks are implemented.
+The Workspace Slot Leasing spike is complete with a go decision. Empty workspaces are disposable: if an empty original disappears while parked, the leased Herdr workspace retains enough metadata for `release` to recreate it. No persistent rule or sentinel window is needed. See [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
 
 ## Requirements
 
@@ -59,11 +59,11 @@ The Workspace Slot Leasing spike is complete and produced a no-go for the archit
 - Hyprland 0.56 or a compatible version exposing `hl.dsp.workspace.change_id`.
 - `xdg-terminal-exec` and `uwsm-app` for managed terminal windows.
 
-The plugin must verify `change_id` support before mutating any workspace. Unsupported versions must fail without parking or renaming the current workspace.
+The coordinator requires Hyprland's Lua config provider before mutating a workspace. Hyprland 0.56 is the supported baseline for `change_id`.
 
 ## Required Spike
 
-Status: **completed, NO-GO**. The reproducible harness is `tests/slot-leasing-spike.sh`; results and cleanup guarantees are documented in [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
+Status: **completed, GO with disposable empty workspaces**. The reversible harnesses are `tests/slot-leasing-spike.sh` and `tests/disposable-empty-spike.sh`; results are documented in [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
 
 Workspace Slot Leasing must pass an isolated spike before the implementation is considered stable. The spike must verify:
 
@@ -94,13 +94,14 @@ omarchy plugin validate .
 qmllint -I /usr/share/omarchy/shell -I /usr/lib/qt6/qml Panel.qml HerdrClient.qml
 bash tests/smoke.sh
 bash tests/panel-smoke.sh
+bash tests/lease-coordinator-smoke.sh
 ```
 
 Then symlink or clone it as `~/.config/omarchy/plugins/guillermodsm.hypr-herdr` and enable it with Omarchy's standard plugin command.
 
 ## IPC
 
-The target IPC surface is:
+The IPC surface is:
 
 ```bash
 omarchy-shell guillermodsm.hypr-herdr openLast
@@ -111,7 +112,7 @@ omarchy-shell guillermodsm.hypr-herdr status
 omarchy-shell guillermodsm.hypr-herdr reconcile
 ```
 
-From a regular numeric workspace, `openLast` acquires that slot or migrates the existing lease to it. From the Herdr workspace that owns the slot, `openLast` acts as a toggle and releases the lease. `openSpace` switches the Herdr space occupying the leased slot. `release` returns the active Herdr space to its home ID and restores the original workspace. `status` must report the leased slot, owning space, home ID, parking ID, and recovery state.
+From a regular numeric workspace, `openLast` acquires that slot or migrates the existing lease to it. From the Herdr workspace that owns the slot, `openLast` acts as a toggle and releases the lease. `openSpace` switches the owner of the leased slot, or migrates the lease when invoked from another numeric slot. `release` returns the active Herdr space to its home ID and restores the original workspace. `status` reports the leased slot, owning space, home ID, parking ID, and recovery state.
 
 The default Herdr socket is `~/.config/herdr/herdr.sock`. `HERDR_SOCKET_PATH` takes precedence, and `HERDR_SESSION` selects `~/.config/herdr/sessions/<name>/herdr.sock` for named sessions.
 
@@ -140,13 +141,14 @@ An active lease must be reconstructible from Hyprland state:
 - `release` is idempotent and restores the original slot and name.
 - Disabling or uninstalling the plugin requires releasing an active lease first.
 
-The emergency recovery command will be documented after the spike confirms the exact supported dispatcher sequence. Until then, Workspace Slot Leasing should only be tested with disposable workspace IDs.
+An emergency recovery command remains Sprint 4 work. Until then, Workspace Slot Leasing should only be tested with disposable workspace IDs.
 
 ## Current Limits
 
-- Workspace Slot Leasing and release are not implemented yet.
-- Lease Coordinator implementation is blocked by the completed no-go spike.
-- The current code still contains direct named-workspace navigation until a replacement architecture is selected.
+- Lease Coordinator is implemented and tested on disposable headless workspaces.
+- Spaces without prepared terminal windows cannot be leased yet; terminal preparation is Sprint 3.
+- Production leasing has not been enabled against normal workspaces yet.
+- Relative navigation may visit internal Herdr or parked workspaces in v0.1.
 - The sidebar currently targets the default output; per-output instances are pending.
 - The first leasing version supports one global slot, not one slot per monitor.
 - Pane windows are focused only when already attached with the expected app-id.
