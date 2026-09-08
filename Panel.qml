@@ -13,6 +13,7 @@ Item {
   property var shell: null
   property var manifest: null
   property bool opened: true
+  property bool preparationEnabled: true
   property string selectedSpaceId: ""
   property string lastSpaceId: ""
 
@@ -90,6 +91,9 @@ Item {
   function openSpace(id) {
     var value = String(id || "")
     if (!spaceById(value)) return "unknown space: " + value
+    selectedSpaceId = value
+    lastSpaceId = value
+    if (!workspaceManager.spaceReady(value)) return workspaceManager.prepareSpace(value)
     return lease.openSpace(value)
   }
 
@@ -99,7 +103,9 @@ Item {
     if (!spaceById(target)) target = client.focusedWorkspaceId
     if (!spaceById(target) && client.workspaces.length > 0)
       target = String(client.workspaces[0].workspace_id || "")
-    return target === "" ? "no Herdr spaces" : lease.toggle(target)
+    if (target === "") return "no Herdr spaces"
+    if (!workspaceManager.spaceReady(target)) return workspaceManager.prepareSpace(target)
+    return lease.toggle(target)
   }
 
   function releaseLease() {
@@ -107,26 +113,7 @@ Item {
   }
 
   function focusPane(id) {
-    var appId = IdCodec.appId(id)
-    var values = Hyprland.toplevels.values
-    for (var i = 0; i < values.length; i++) {
-      var top = values[i]
-      var ipc = top.lastIpcObject || {}
-      if (String(ipc.class || ipc.initialClass || "") === appId) {
-        if (top.wayland) {
-          top.wayland.activate()
-        } else {
-          if (top.workspace) top.workspace.activate()
-          var address = String(top.address || "")
-          if (Hyprland.usingLua)
-            Hyprland.dispatch("hl.dsp.focus({ window = \"address:" + address + "\" })")
-          else
-            Hyprland.dispatch("focuswindow address:" + address)
-        }
-        return "ok"
-      }
-    }
-    return "pane window is not attached"
+    return workspaceManager.focusPane(String(id || ""))
   }
 
   function statusJson() {
@@ -142,6 +129,13 @@ Item {
       selectedSpaceId: selectedSpaceId,
       focusedWorkspace: focusedWorkspaceName,
       lastSnapshotAt: client.lastSnapshotAt,
+      preparation: {
+        state: workspaceManager.state,
+        error: workspaceManager.errorMessage,
+        attachedPanes: workspaceManager.attachedPaneCount,
+        unavailablePanes: workspaceManager.unavailablePaneCount,
+        pendingPaneId: workspaceManager.pendingPaneId
+      },
       lease: {
         active: lease.active,
         busy: lease.busy,
@@ -187,6 +181,14 @@ Item {
         root.lastSpaceId = ownerSpaceId
       }
     }
+  }
+
+  WorkspaceManager {
+    id: workspaceManager
+    enabled: root.preparationEnabled && client.state === "ready"
+    spaces: client.workspaces
+    panes: client.panes
+    leaseCoordinator: lease
   }
 
   IpcHandler {
@@ -249,7 +251,10 @@ Item {
           Text {
             width: parent.width
             text: client.state === "ready"
-              ? client.workspaces.length + " spaces · " + client.panes.length + " panes"
+              ? client.workspaces.length + " spaces · " + client.panes.length + " panes · "
+                + workspaceManager.state
+                + (workspaceManager.unavailablePaneCount > 0
+                  ? " (" + workspaceManager.unavailablePaneCount + " unavailable)" : "")
               : client.state
             color: root.dim
             font.family: Style.font.family
@@ -363,6 +368,7 @@ Item {
                   iconSize: Style.font.caption
                   selected: String(modelData.pane_id || "") === client.focusedPaneId
                   tooltipText: String(modelData.cwd || "")
+                  enabled: String(modelData.terminal_id || "") !== ""
                   onClicked: root.focusPane(String(modelData.pane_id || ""))
                 }
               }

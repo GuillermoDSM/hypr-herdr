@@ -334,6 +334,7 @@ hypr-herdr/
 ├── Panel.qml
 ├── HerdrClient.qml
 ├── WorkspaceLease.qml
+├── WorkspaceManager.qml
 ├── IdCodec.js
 ├── LeaseCodec.js
 ├── README.md

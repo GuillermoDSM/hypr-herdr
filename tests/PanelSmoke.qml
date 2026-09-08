@@ -5,6 +5,7 @@ ShellRoot {
   Panel {
     id: panel
     manifest: ({ id: "guillermodsm.hypr-herdr" })
+    preparationEnabled: false
   }
 
   Timer {

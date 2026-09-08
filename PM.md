@@ -118,28 +118,30 @@ Estado: **completado**.
 
 ## Sprint 3 - Workspaces y terminales
 
+Estado: **completado**.
+
 ### US-301 - Reconciliar workspaces Herdr
 
-- [ ] Crear un home workspace por cada space vivo.
-- [ ] Adoptar workspaces `herdr:*` existentes sin duplicarlos.
-- [ ] Gestionar creación, cierre, renombre y movimiento de spaces.
-- [ ] No destruir un workspace con ventanas GUI ajenas.
+- [x] Asignar un home ID por cada space vivo y materializarlo con su primera terminal.
+- [x] Adoptar workspaces `herdr:*` existentes sin duplicarlos.
+- [x] Gestionar creación, cierre, renombre y movimiento de spaces.
+- [x] No destruir un workspace con ventanas GUI ajenas.
 
 ### US-302 - Adjuntar panes
 
-- [ ] Crear una terminal por pane con `xdg-terminal-exec` y `uwsm-app`.
-- [ ] Usar un `app-id` estable y comprobar duplicados.
-- [ ] Ejecutar `herdr terminal attach <id> --takeover` solo para la ventana propia.
-- [ ] Reconciliar panes creados, cerrados y movidos.
-- [ ] Recrear una terminal cerrada al seleccionar su pane.
+- [x] Crear una terminal por pane con `xdg-terminal-exec` y `uwsm-app`.
+- [x] Usar un `app-id` estable y comprobar duplicados.
+- [x] Ejecutar `herdr terminal attach <id> --takeover` solo para la ventana propia.
+- [x] Reconciliar panes creados, cerrados y movidos.
+- [x] Recrear una terminal cerrada al seleccionar su pane.
 
 **Technical notes:** antes de `--takeover`, verificar que el `app-id` pertenece al pane esperado y que no existe otra ventana administrada. Cerrar la vista no debe cerrar el pane ni su proceso Herdr.
 
 ### US-303 - Preparación y rendimiento
 
-- [ ] Preparar terminales faltantes con concurrencia limitada.
-- [ ] Exponer estados `preparing` y `ready`.
-- [ ] Evitar procesos, polling y escrituras durante un switch.
+- [x] Preparar terminales faltantes con concurrencia limitada.
+- [x] Exponer estados `preparing` y `ready`.
+- [x] Evitar procesos, polling y escrituras durante un switch.
 
 ## Sprint 4 - Recuperación
 

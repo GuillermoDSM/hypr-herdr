@@ -47,6 +47,7 @@ This repository is an early implementation. The existing vertical slice provides
 - Event subscriptions with debounced authoritative refreshes.
 - Reconnection with bounded exponential backoff.
 - A themed layer-shell sidebar for spaces, tabs, panes, and agent states.
+- Event-driven preparation with one managed terminal window per Herdr pane.
 - Omarchy IPC methods for navigation and diagnostics.
 
 The Workspace Slot Leasing spike is complete with a go decision. Empty workspaces are disposable: if an empty original disappears while parked, the leased Herdr workspace retains enough metadata for `release` to recreate it. No persistent rule or sentinel window is needed. See [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
@@ -91,10 +92,11 @@ For local development, validate the checkout first:
 
 ```bash
 omarchy plugin validate .
-qmllint -I /usr/share/omarchy/shell -I /usr/lib/qt6/qml Panel.qml HerdrClient.qml
+qmllint -I /usr/share/omarchy/shell -I /usr/lib/qt6/qml Panel.qml HerdrClient.qml WorkspaceLease.qml WorkspaceManager.qml
 bash tests/smoke.sh
 bash tests/panel-smoke.sh
 bash tests/lease-coordinator-smoke.sh
+bash tests/workspace-manager-smoke.sh
 ```
 
 Then symlink or clone it as `~/.config/omarchy/plugins/guillermodsm.hypr-herdr` and enable it with Omarchy's standard plugin command.
@@ -112,7 +114,7 @@ omarchy-shell guillermodsm.hypr-herdr status
 omarchy-shell guillermodsm.hypr-herdr reconcile
 ```
 
-From a regular numeric workspace, `openLast` acquires that slot or migrates the existing lease to it. From the Herdr workspace that owns the slot, `openLast` acts as a toggle and releases the lease. `openSpace` switches the owner of the leased slot, or migrates the lease when invoked from another numeric slot. `release` returns the active Herdr space to its home ID and restores the original workspace. `status` reports the leased slot, owning space, home ID, parking ID, and recovery state.
+From a regular numeric workspace, `openLast` acquires that slot or migrates the existing lease to it. From the Herdr workspace that owns the slot, `openLast` acts as a toggle and releases the lease. `openSpace` switches the owner of the leased slot, or migrates the lease when invoked from another numeric slot. If preparation is still running, retry after `status` reports `preparation.state` as `ready`. `release` returns the active Herdr space to its home ID and restores the original workspace.
 
 The default Herdr socket is `~/.config/herdr/herdr.sock`. `HERDR_SOCKET_PATH` takes precedence, and `HERDR_SESSION` selects `~/.config/herdr/sessions/<name>/herdr.sock` for named sessions.
 
@@ -146,13 +148,13 @@ An emergency recovery command remains Sprint 4 work. Until then, Workspace Slot 
 ## Current Limits
 
 - Lease Coordinator is implemented and tested on disposable headless workspaces.
-- Spaces without prepared terminal windows cannot be leased yet; terminal preparation is Sprint 3.
+- Spaces without panes reserve a home ID but have no physical workspace until a pane exists.
 - Production leasing has not been enabled against normal workspaces yet.
 - Relative navigation may visit internal Herdr or parked workspaces in v0.1.
 - The sidebar currently targets the default output; per-output instances are pending.
 - The first leasing version supports one global slot, not one slot per monitor.
-- Pane windows are focused only when already attached with the expected app-id.
-- Terminal creation, adoption, movement, and closure reconciliation are pending a safe ownership check.
+- A manually closed pane window is recreated only when its pane or space is selected again.
+- Existing pane windows are adopted only by their exact stable `app-id`; foreign windows are never closed.
 - Incremental events trigger a fresh snapshot rather than mutating the local model in place.
 
 ## License

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "guillermodsm.hypr-herdr",
   "name": "Hypr Herdr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "guillermodsm",
   "description": "Herdr spaces as native Omarchy workspaces.",
   "kinds": ["panel"],
