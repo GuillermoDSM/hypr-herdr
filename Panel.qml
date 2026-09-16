@@ -28,7 +28,7 @@ Item {
   readonly property color foreground: Color.popups.text
   readonly property color dim: Util.alpha(Color.popups.text, 0.65)
   readonly property string settingsPath: Quickshell.statePath("hypr-herdr-panel.json")
-  readonly property real minimumSidebarWidth: Style.space(220)
+  readonly property real minimumSidebarWidth: Style.space(160)
   readonly property real maximumSidebarWidth: Style.space(620)
   readonly property real sidebarPixelWidth: {
     var screenWidth = sidebar.screen ? Number(sidebar.screen.width || 0) : 0
@@ -161,7 +161,7 @@ Item {
     var screenWidth = sidebar.screen ? Number(sidebar.screen.width || 0) : 0
     if (screenWidth <= 0) return
     var clamped = Math.max(minimumSidebarWidth, Math.min(maximumSidebarWidth, Number(width || 0)))
-    sidebarWidthRatio = Math.max(0.12, Math.min(0.45, clamped / screenWidth))
+    sidebarWidthRatio = clamped / screenWidth
   }
 
   function loadSettings(raw) {
@@ -169,7 +169,7 @@ Item {
     try {
       var parsed = JSON.parse(String(raw || "{}"))
       var ratio = Number(parsed.sidebarWidthRatio)
-      if (isFinite(ratio) && ratio > 0) sidebarWidthRatio = Math.max(0.12, Math.min(0.45, ratio))
+      if (isFinite(ratio) && ratio > 0) sidebarWidthRatio = Math.max(0.04, Math.min(0.9, ratio))
     } catch (error) {
       console.warn("hypr-herdr: could not parse panel settings:", error)
     }
@@ -230,7 +230,10 @@ Item {
         visible: sidebar.visible,
         onHerdrWorkspace: onHerdrWorkspace,
         width: sidebarPixelWidth,
-        widthRatio: sidebarWidthRatio
+        widthRatio: sidebarWidthRatio,
+        minWidth: minimumSidebarWidth,
+        maxWidth: maximumSidebarWidth,
+        screenWidth: sidebar.screen ? Number(sidebar.screen.width || 0) : 0
       },
       preparation: {
         state: workspaceManager.state,
@@ -332,6 +335,13 @@ Item {
     id: sidebar
     visible: root.opened && root.onHerdrWorkspace
     anchors { top: true; bottom: true; left: true }
+    // At fractional scales (e.g. 1.25) the bar/sidebar boundary lands on a half
+    // device pixel, so rounding can leave a 1px seam exposing the wallpaper
+    // between them. Overlapping one unit hides it under our opaque background;
+    // at integer scales the overlap only covers the bar's background-colored
+    // edge, which has no widgets.
+    margins.top: -1
+    margins.bottom: -1
     implicitWidth: root.sidebarPixelWidth
     color: Color.popups.background
     exclusionMode: ExclusionMode.Auto

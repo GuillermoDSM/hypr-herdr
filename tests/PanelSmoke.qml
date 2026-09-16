@@ -47,20 +47,28 @@ ShellRoot {
         var ratio = contrastRatio(composite(panel.statusColor(statuses[i]), background), background)
         if (ratio < 3) statusOk = false
       }
+      var clampOk = true
+      if (status.panel.screenWidth > 0) {
+        panel.setSidebarWidth(1)
+        var narrow = JSON.parse(panel.statusJson()).panel
+        panel.setSidebarWidth(1000000)
+        var wide = JSON.parse(panel.statusJson()).panel
+        clampOk = narrow.width === narrow.minWidth && wide.width === wide.maxWidth
+      }
       if (status.state === "ready" && status.protocol === 20
           && status.agents >= 0
           && status.layouts >= 0
-          && status.panel.width > 0
-          && status.panel.widthRatio >= 0.12
-          && status.panel.widthRatio <= 0.45
-          && primaryRatio >= 4.5 && secondaryRatio >= 4.5 && statusOk)
+          && status.panel.width >= status.panel.minWidth
+          && status.panel.width <= status.panel.maxWidth
+          && status.panel.widthRatio > 0
+          && primaryRatio >= 4.5 && secondaryRatio >= 4.5 && statusOk && clampOk)
         console.log("PANEL_SMOKE_OK", status.workspaces, status.tabs, status.panes, status.agents,
                     status.panel.width, status.panel.widthRatio,
                     "contrast=" + primaryRatio.toFixed(2) + "/" + secondaryRatio.toFixed(2))
       else
         console.error("PANEL_SMOKE_FAILED", panel.statusJson(),
                       "contrast=" + primaryRatio.toFixed(2) + "/" + secondaryRatio.toFixed(2),
-                      "statusOk=" + statusOk)
+                      "statusOk=" + statusOk, "clampOk=" + clampOk)
       Qt.quit()
     }
   }

@@ -219,7 +219,8 @@ El sidebar es una superficie `PanelWindow` de Quickshell con layer-shell:
 - Se muestra cuando el workspace enfocado tiene un nombre `herdr:*`, sin depender de que su ID sea interno o arrendado.
 - Se oculta en workspaces numéricos originales, especiales o ajenos al plugin.
 - Reserva mediante su zona exclusiva un ancho ajustable desde el borde derecho.
-- Persiste el ancho como proporción del monitor, con límites mínimos y máximos en unidades lógicas.
+- Persiste el ancho como proporción del monitor, con límites mínimos y máximos en unidades lógicas (160–620; escalan con el tema).
+- Con escalas fraccionarias solapa una unidad lógica con la barra para que el redondeo de píxeles no deje una franja visible entre ambas (también cubre barras inferiores).
 - No forma parte del árbol de ventanas de Hyprland.
 - Conserva posición y apariencia durante el cambio de space.
 - Usa `Color`, `Style` y componentes compartidos de Omarchy.
