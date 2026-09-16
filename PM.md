@@ -28,10 +28,11 @@ Estados: `[x]` hecho, `[ ]` pendiente.
 
 ### US-003 - Sidebar
 
-- [x] Mostrar spaces, tabs, panes y estado de agentes.
+- [x] Mostrar spaces y agentes globales con su estado y ubicación.
 - [x] Integrar colores, tipografía y componentes de Omarchy.
 - [x] Mostrar el panel solo en workspaces con nombre `herdr:*`.
 - [x] Enfocar una ventana de pane ya adjunta por `app-id`.
+- [x] Redimensionar desde el borde y persistir el ancho como proporción del monitor.
 
 ### US-004 - IPC y navegación base
 
@@ -147,7 +148,7 @@ Estado: **completado**.
 
 ### US-401 - Adopción al arrancar
 
-- [ ] Reconstruir el arriendo desde nombres e IDs de Hyprland.
+- [x] Reconstruir el arriendo desde nombres e IDs de Hyprland.
 - [ ] Adoptar transacciones completas después de hot reload.
 - [ ] Detectar transacciones parciales y bloquear mutaciones.
 - [ ] Adoptar terminales existentes por `app-id`.
@@ -183,3 +184,18 @@ Estado: **completado**.
 - [ ] Medir transición visual y respuesta del sidebar.
 - [ ] Pasar validación, lint y suite completa.
 - [ ] Actualizar README con límites y recuperación confirmados.
+
+### US-503 - Ciclo de vida y flujo de desarrollo
+
+- [x] Alinear `open`, `close` y `show` con el contrato de paneles de Omarchy.
+- [x] Hacer que `openSpace` abra la sidebar.
+- [x] Exponer el estado de la vista en `status` (`panel.opened`, `panel.visible`, `panel.onHerdrWorkspace`).
+- [x] Añadir `tests/dev.sh` con `sync`, `watch`, `open`, `release`, `hide`, `show`, `status`, `reload`, `enable` y `disable`.
+- [x] Documentar detach como `release` y el plugin como siempre cargado.
+- [x] Conservar el inventario `app-id`/`terminal_id` durante hot reload y cancelar operaciones transitorias al desactivar el manager.
+
+**Technical notes:** un symlink en `~/.config/omarchy/plugins/` no recibe hot reload porque el watcher del shell usa `inotifywait -r`, que no atraviesa symlinks. El checkout se sincroniza con `rsync` a un directorio real y `watch` repite la sincronización en cada guardado. `disable` se rechaza si hay un arriendo activo.
+
+**Technical notes:** el modelo de `Hyprland.workspaces` conserva objetos obsoletos tras `change_id` (Quickshell ignora `changeworkspaceid` y `Hyprland.refreshWorkspaces()` no crea ni elimina objetos), así que el lease decide sobre `hyprctl -j workspaces` y `hyprctl -j activeworkspace` con una caché refrescada por eventos. `tests/lease-repeat-smoke.sh` cubre adquirir, liberar y volver a adquirir reutilizando el mismo parked.
+
+**Technical notes:** `Color.muted` es un tono de superficie en varios temas (1.59:1 sobre el fondo actual), así que el sidebar no lo usa para texto: el secundario es `Util.alpha(Color.popups.text, 0.65)` (7.62:1 con el tema hackerman) y los estados `idle`/`unknown` usan 0.65/0.5. `tests/PanelSmoke.qml` verifica contraste WCAG ≥ 4.5:1 para texto y ≥ 3:1 para glifos de estado.

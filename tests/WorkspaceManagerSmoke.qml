@@ -18,6 +18,7 @@ ShellRoot {
 
   WorkspaceManager {
     id: commandManager
+    persistenceKey: "manager-smoke-command"
   }
 
   Component.onCompleted: {
@@ -34,6 +35,7 @@ ShellRoot {
 
   WorkspaceManager {
     id: manager
+    persistenceKey: "manager-smoke-runtime"
     enabled: true
     spaces: root.spaces
     panes: root.panes

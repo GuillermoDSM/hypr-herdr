@@ -13,8 +13,9 @@ ShellRoot {
       if (state === "ready" && protocol === 20
           && IdCodec.workspaceName("w1") === "herdr:dzE"
           && IdCodec.decode(encoded) === "w1"
+          && layouts.length === tabs.length
           && lease && lease.leased && lease.slotId === 2 && lease.homeId === 1000000001)
-        console.log("HERDR_SMOKE_OK", state, protocol, workspaces.length, tabs.length, panes.length)
+        console.log("HERDR_SMOKE_OK", state, protocol, workspaces.length, tabs.length, panes.length, layouts.length)
       else
         console.error("HERDR_SMOKE_FAILED", state, protocol, IdCodec.workspaceName("w1"))
       Qt.quit()

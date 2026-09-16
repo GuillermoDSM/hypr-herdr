@@ -1,7 +1,9 @@
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Io
 import "IdCodec.js" as IdCodec
+import "LayoutSync.js" as LayoutSync
 import "LeaseCodec.js" as LeaseCodec
 
 Item {
@@ -10,8 +12,12 @@ Item {
 
   property var spaces: []
   property var panes: []
+  property var layouts: []
   property var leaseCoordinator: null
   property bool enabled: false
+  property bool layoutSyncEnabled: false
+  property bool layoutWriteBusy: false
+  property string persistenceKey: "default"
   property string testLauncher: ""
   property int testHomeBase: 0
   property string prioritySpaceId: ""
@@ -20,10 +26,10 @@ Item {
   property string pendingCommand: ""
   property string pendingSpaceId: ""
   property int pendingHomeId: 0
-  property var managedAppIds: ({})
-  property var attachedTerminalIds: ({})
-  property var reattachingTerminalIds: ({})
-  property var failedTerminalIds: ({})
+  property alias managedAppIds: persisted.managedAppIds
+  property alias attachedTerminalIds: persisted.attachedTerminalIds
+  property alias reattachingTerminalIds: persisted.reattachingTerminalIds
+  property alias failedTerminalIds: persisted.failedTerminalIds
   property string state: enabled ? "preparing" : "disabled"
   property string errorMessage: ""
   property int attachedPaneCount: 0
@@ -31,11 +37,85 @@ Item {
   property int settleAttempts: 0
   property string settlingKey: ""
   property bool inventoryReady: false
+  property string layoutState: layoutSyncEnabled ? "waiting" : "disabled"
+  property string layoutErrorMessage: ""
+  property bool layoutSettingsLoaded: false
+  property var initializedLayouts: ({})
+  property var failedLayoutMigrations: ({})
+  property string pendingLayoutSpaceId: ""
+  property string pendingLayoutSignature: ""
+  property int layoutSettleAttempts: 0
+  property string lastRatioUpdateKey: ""
+
+  readonly property string layoutSettingsPath: Quickshell.statePath("hypr-herdr-layouts.json")
 
   readonly property bool preparing: enabled && state === "preparing"
   readonly property bool ready: enabled && state === "ready"
 
   signal reconciliationComplete()
+  signal layoutRatioUpdates(var updates)
+
+  PersistentProperties {
+    id: persisted
+    reloadableId: "hypr-herdr-workspace-manager:" + root.persistenceKey
+    property var managedAppIds: ({})
+    property var attachedTerminalIds: ({})
+    property var reattachingTerminalIds: ({})
+    property var failedTerminalIds: ({})
+  }
+
+  FileView {
+    id: layoutSettingsFile
+    path: root.layoutSettingsPath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadLayoutSettings(text())
+    onLoadFailed: root.loadLayoutSettings("")
+  }
+
+  function loadLayoutSettings(raw) {
+    if (layoutSettingsLoaded) return
+    try {
+      var parsed = JSON.parse(String(raw || "{}"))
+      initializedLayouts = parsed && parsed.initializedLayouts
+        && typeof parsed.initializedLayouts === "object" ? parsed.initializedLayouts : ({})
+    } catch (error) {
+      console.warn("hypr-herdr: could not parse layout settings:", error)
+      initializedLayouts = ({})
+    }
+    layoutSettingsLoaded = true
+    scheduleLayoutSync()
+  }
+
+  function saveLayoutSettings() {
+    if (!layoutSettingsLoaded) return
+    layoutSettingsFile.setText(JSON.stringify({ version: 1, initializedLayouts: initializedLayouts }, null, 2) + "\n")
+  }
+
+  function layoutPaneSignature(layout) {
+    var ids = []
+    var values = layout && Array.isArray(layout.panes) ? layout.panes : []
+    for (var i = 0; i < values.length; i++) ids.push(String(values[i].pane_id || ""))
+    ids.sort()
+    return ids.join("\n")
+  }
+
+  function markLayoutInitialized(spaceId, signature) {
+    var next = Object.assign({}, initializedLayouts)
+    next[String(spaceId)] = String(signature)
+    initializedLayouts = next
+    saveLayoutSettings()
+  }
+
+  function invalidateLayout(spaceId) {
+    var key = String(spaceId || "")
+    if (key === "" || initializedLayouts[key] === undefined) return
+    var next = Object.assign({}, initializedLayouts)
+    delete next[key]
+    initializedLayouts = next
+    saveLayoutSettings()
+  }
 
   function decodeToken(value) {
     try {
@@ -143,6 +223,18 @@ Item {
     return top && top.workspace ? workspaceId(top.workspace) : 0
   }
 
+  function topRect(top) {
+    var ipc = top ? (top.lastIpcObject || {}) : {}
+    var at = ipc.at || []
+    var size = ipc.size || []
+    return {
+      x: Number(at[0] || 0),
+      y: Number(at[1] || 0),
+      width: Number(size[0] || 0),
+      height: Number(size[1] || 0)
+    }
+  }
+
   function topsForAppId(appId) {
     var result = []
     var values = Hyprland.toplevels.values || []
@@ -155,6 +247,184 @@ Item {
       }
     }
     return result
+  }
+
+  function activeHerdrSpaceId() {
+    var focused = Hyprland.focusedWorkspace
+    var focusedId = workspaceId(focused)
+    for (var i = 0; i < spaces.length; i++) {
+      var spaceId = String(spaces[i].workspace_id || "")
+      var stable = stableWorkspace(spaceId)
+      if (stable && workspaceId(stable.workspace) === focusedId) return spaceId
+    }
+    return ""
+  }
+
+  function layoutForSpace(spaceId) {
+    var space = spaceForId(spaceId)
+    var activeTabId = String((space && space.active_tab_id) || "")
+    var fallback = null
+    for (var i = 0; i < layouts.length; i++) {
+      if (String(layouts[i].workspace_id || "") !== String(spaceId)) continue
+      if (String(layouts[i].tab_id || "") === activeTabId) return layouts[i]
+      if (!fallback) fallback = layouts[i]
+    }
+    return fallback
+  }
+
+  function windowsForLayout(layout) {
+    var result = []
+    var values = layout && Array.isArray(layout.panes) ? layout.panes : []
+    for (var i = 0; i < values.length; i++) {
+      var paneId = String(values[i].pane_id || "")
+      var matches = topsForAppId(IdCodec.appId(paneId))
+      if (matches.length !== 1) return null
+      result.push({ paneId: paneId, rect: topRect(matches[0]) })
+    }
+    return result
+  }
+
+  function scheduleLayoutSync() {
+    if (layoutSyncEnabled && enabled && ready && layoutSettingsLoaded) layoutSyncTimer.restart()
+  }
+
+  function dispatchLayoutMigration(spaceId, signature, analysis) {
+    var code = "function() local original = hl.get_active_window(); "
+    for (var swapIndex = 0; swapIndex < analysis.swaps.length; swapIndex++) {
+      var swap = analysis.swaps[swapIndex]
+      var firstId = IdCodec.appId(String(swap.firstPaneId || ""))
+      var secondId = IdCodec.appId(String(swap.secondPaneId || ""))
+      code += "local a = hl.get_window(" + luaString("class:" + firstId) + "); "
+        + "local b = hl.get_window(" + luaString("class:" + secondId) + "); "
+        + "if a and b then hl.dispatch(hl.dsp.focus({ window = a })); "
+        + "hl.dispatch(hl.dsp.window.swap({ target = b })); end; "
+    }
+    for (var ratioIndex = 0; ratioIndex < analysis.imports.length; ratioIndex++) {
+      var operation = analysis.imports[ratioIndex]
+      var appId = IdCodec.appId(String(operation.paneId || ""))
+      var ratio = Math.max(0.1, Math.min(1.9, Number(operation.ratio || 0.5) * 2))
+      code += "local w = hl.get_window(" + luaString("class:" + appId) + "); "
+        + "if w then hl.dispatch(hl.dsp.focus({ window = w })); "
+        + "hl.dispatch(hl.dsp.layout(" + luaString("splitratio " + ratio.toFixed(8) + " exact") + ")); end; "
+    }
+    code += "if original then hl.dispatch(hl.dsp.focus({ window = original })); end; end"
+
+    pendingLayoutSpaceId = String(spaceId)
+    pendingLayoutSignature = String(signature)
+    layoutSettleAttempts = 0
+    layoutState = "migrating"
+    layoutErrorMessage = ""
+    Hyprland.dispatch(code)
+    layoutSettleTimer.restart()
+  }
+
+  function finishLayoutMigration(success, message) {
+    var spaceId = pendingLayoutSpaceId
+    var signature = pendingLayoutSignature
+    pendingLayoutSpaceId = ""
+    pendingLayoutSignature = ""
+    layoutSettleAttempts = 0
+    if (success) {
+      markLayoutInitialized(spaceId, signature)
+      layoutState = "ready"
+      layoutErrorMessage = ""
+      scheduleLayoutSync()
+      return
+    }
+    var failures = Object.assign({}, failedLayoutMigrations)
+    failures[spaceId] = signature
+    failedLayoutMigrations = failures
+    layoutState = "error"
+    layoutErrorMessage = String(message || "Wayland layout migration did not settle")
+  }
+
+  function syncActiveLayout(verifying) {
+    if (!layoutSyncEnabled || !enabled || !ready || !layoutSettingsLoaded) return
+    var spaceId = activeHerdrSpaceId()
+    if (spaceId === "") {
+      if (pendingLayoutSpaceId === "") layoutState = "waiting"
+      return
+    }
+    if (pendingLayoutSpaceId !== "" && pendingLayoutSpaceId !== spaceId) return
+
+    var layout = layoutForSpace(spaceId)
+    if (!layout) {
+      layoutState = "waiting"
+      return
+    }
+    var windows = windowsForLayout(layout)
+    var stable = stableWorkspace(spaceId)
+    if (!windows || !stable || workspaceWindowCount(stable.workspace) !== windows.length) {
+      layoutState = "blocked"
+      layoutErrorMessage = "layout sync requires one managed window per pane and no extra tiled windows"
+      return
+    }
+
+    var analysis = LayoutSync.analyze(layout, windows)
+    if (!analysis.compatible) {
+      layoutState = "blocked"
+      layoutErrorMessage = String(analysis.error || "Herdr and Wayland layouts are incompatible")
+      return
+    }
+    var signature = layoutPaneSignature(layout)
+
+    if (pendingLayoutSpaceId !== "") {
+      if (analysis.swaps.length === 0 && analysis.imports.length === 0) {
+        finishLayoutMigration(true, "")
+      } else if (verifying && ++layoutSettleAttempts >= 20) {
+        finishLayoutMigration(false, "Wayland did not confirm the requested layout")
+      } else {
+        layoutSettleTimer.restart()
+      }
+      return
+    }
+
+    if (initializedLayouts[spaceId] !== signature) {
+      if (failedLayoutMigrations[spaceId] === signature) {
+        layoutState = "error"
+        layoutErrorMessage = "layout migration is blocked until the pane set changes"
+        return
+      }
+      if (analysis.swaps.length > 0 || analysis.imports.length > 0) {
+        dispatchLayoutMigration(spaceId, signature, analysis)
+      } else {
+        markLayoutInitialized(spaceId, signature)
+        layoutState = "ready"
+        layoutErrorMessage = ""
+      }
+      return
+    }
+
+    if (analysis.swaps.length > 0) {
+      layoutState = "blocked"
+      layoutErrorMessage = "Herdr pane order differs from the authoritative Wayland layout"
+      return
+    }
+
+    if (layoutWriteBusy) {
+      layoutState = "syncing"
+      return
+    }
+
+    var updates = []
+    for (var updateIndex = 0; updateIndex < analysis.updates.length; updateIndex++) {
+      updates.push({
+        tabId: String(layout.tab_id || ""),
+        path: analysis.updates[updateIndex].path,
+        ratio: analysis.updates[updateIndex].ratio
+      })
+    }
+    var updateKey = JSON.stringify(updates)
+    if (updates.length > 0 && updateKey !== lastRatioUpdateKey) {
+      lastRatioUpdateKey = updateKey
+      layoutRatioUpdates(updates)
+      layoutState = "syncing"
+      layoutErrorMessage = ""
+    } else if (updates.length === 0) {
+      lastRatioUpdateKey = ""
+      layoutState = "ready"
+      layoutErrorMessage = ""
+    }
   }
 
   function assignedHomes() {
@@ -232,6 +502,23 @@ Item {
     if (enabled && inventoryReady) reconcileTimer.restart()
   }
 
+  function stopTransientWork() {
+    reconcileTimer.stop()
+    initialInventoryTimer.stop()
+    settleTimer.stop()
+    launchTimeout.stop()
+    layoutSyncTimer.stop()
+    layoutSettleTimer.stop()
+    inventoryReady = false
+    pendingPaneId = ""
+    pendingAppId = ""
+    pendingCommand = ""
+    pendingSpaceId = ""
+    pendingHomeId = 0
+    settlingKey = ""
+    settleAttempts = 0
+  }
+
   function beginSettling(key) {
     var value = String(key)
     if (settlingKey !== value) {
@@ -285,6 +572,7 @@ Item {
     pendingCommand = commandForPane(pane)
     pendingSpaceId = String(pane.workspace_id || "")
     pendingHomeId = targetId
+    invalidateLayout(String(pane.workspace_id || ""))
     markManaged(appId, true)
     var destination = stableWorkspace(String(pane.workspace_id || ""))
     var code = "function() "
@@ -486,6 +774,7 @@ Item {
     prioritySpaceId = ""
     state = "ready"
     settlingKey = ""
+    scheduleLayoutSync()
     reconciliationComplete()
   }
 
@@ -541,10 +830,13 @@ Item {
   }
 
   onSpacesChanged: schedule()
-  onPanesChanged: schedule()
+  onPanesChanged: { schedule(); scheduleLayoutSync() }
+  onLayoutsChanged: scheduleLayoutSync()
+  onLayoutSyncEnabledChanged: scheduleLayoutSync()
+  onLayoutWriteBusyChanged: if (!layoutWriteBusy) scheduleLayoutSync()
   onEnabledChanged: {
     if (!enabled) {
-      inventoryReady = false
+      stopTransientWork()
       state = "disabled"
       return
     }
@@ -553,16 +845,20 @@ Item {
     Hyprland.refreshToplevels()
     initialInventoryTimer.restart()
   }
-  Component.onCompleted: if (enabled) {
-    Hyprland.refreshWorkspaces()
-    Hyprland.refreshToplevels()
-    initialInventoryTimer.restart()
+  Component.onCompleted: {
+    layoutSettingsFile.reload()
+    if (enabled) {
+      Hyprland.refreshWorkspaces()
+      Hyprland.refreshToplevels()
+      initialInventoryTimer.restart()
+    }
   }
 
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       settleTimer.restart()
+      root.scheduleLayoutSync()
     }
   }
 
@@ -581,6 +877,23 @@ Item {
     interval: 0
     repeat: false
     onTriggered: root.reconcile()
+  }
+
+  Timer {
+    id: layoutSyncTimer
+    interval: 100
+    repeat: false
+    onTriggered: root.syncActiveLayout(false)
+  }
+
+  Timer {
+    id: layoutSettleTimer
+    interval: 100
+    repeat: false
+    onTriggered: {
+      Hyprland.refreshToplevels()
+      root.syncActiveLayout(true)
+    }
   }
 
   Timer {

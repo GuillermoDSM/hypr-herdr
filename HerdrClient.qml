@@ -24,6 +24,7 @@ Item {
   property var tabs: []
   property var panes: []
   property var agents: []
+  property var layouts: []
   property string focusedWorkspaceId: ""
   property string focusedTabId: ""
   property string focusedPaneId: ""
@@ -36,8 +37,12 @@ Item {
   property string subscribedPaneKey: ""
   property int retryDelayMs: 1000
   property int requestSequence: 0
+  property var mutationQueue: []
+  property bool mutationWanted: false
+  property string mutationId: ""
 
   signal snapshotApplied()
+  signal mutationFailed(string message)
 
   function paneKey() {
     var ids = []
@@ -83,6 +88,44 @@ Item {
     }
     snapshotPending = false
     snapshotWanted = true
+  }
+
+  function setLayoutRatios(updates) {
+    if (!Array.isArray(updates) || updates.length === 0) return
+    var next = mutationQueue.slice()
+    for (var i = 0; i < updates.length; i++) {
+      var update = updates[i] || {}
+      if (!update.tabId || !Array.isArray(update.path) || !isFinite(Number(update.ratio))) continue
+      next.push({
+        id: "hypr-herdr:layout-ratio:" + (++requestSequence),
+        method: "layout.set_split_ratio",
+        params: {
+          tab_id: String(update.tabId),
+          path: update.path,
+          ratio: Math.max(0.05, Math.min(0.95, Number(update.ratio)))
+        }
+      })
+    }
+    mutationQueue = next
+    startNextMutation()
+  }
+
+  function startNextMutation() {
+    if (!running || mutationWanted || mutationQueue.length === 0) return
+    mutationWanted = true
+  }
+
+  function handleMutationLine(line) {
+    var message = null
+    try { message = JSON.parse(String(line || "")) } catch (error) {}
+    if (!message || message.error) {
+      var detail = message && message.error ? String(message.error.message || "mutation failed")
+        : "Herdr returned an invalid layout mutation response"
+      mutationFailed(detail)
+    }
+    mutationWanted = false
+    mutationId = ""
+    mutationAgain.restart()
   }
 
   function handleEventLine(line) {
@@ -142,6 +185,7 @@ Item {
     tabs = Array.isArray(snapshot.tabs) ? snapshot.tabs : []
     panes = Array.isArray(snapshot.panes) ? snapshot.panes : []
     agents = Array.isArray(snapshot.agents) ? snapshot.agents : []
+    layouts = Array.isArray(snapshot.layouts) ? snapshot.layouts : []
     focusedWorkspaceId = String(snapshot.focused_workspace_id || "")
     focusedTabId = String(snapshot.focused_tab_id || "")
     focusedPaneId = String(snapshot.focused_pane_id || "")
@@ -186,6 +230,13 @@ Item {
       root.retryDelayMs = Math.min(30000, root.retryDelayMs * 2)
       root.reconnectNow()
     }
+  }
+
+  Timer {
+    id: mutationAgain
+    interval: 0
+    repeat: false
+    onTriggered: root.startNextMutation()
   }
 
   Timer {
@@ -237,6 +288,32 @@ Item {
     parser: SplitParser {
       splitMarker: "\n"
       onRead: function(line) { root.handleEventLine(line) }
+    }
+  }
+
+  Socket {
+    id: mutationSocket
+    path: root.socketPath
+    connected: root.running && root.mutationWanted
+
+    onConnectionStateChanged: if (connected && root.mutationQueue.length > 0) {
+      var next = root.mutationQueue.slice()
+      var request = next.shift()
+      root.mutationQueue = next
+      root.mutationId = String(request.id || "")
+      write(JSON.stringify(request) + "\n")
+      flush()
+    }
+    onError: function(error) {
+      root.mutationFailed("Cannot write Herdr layout at " + root.socketPath)
+      root.mutationWanted = false
+      root.mutationId = ""
+      mutationAgain.restart()
+    }
+
+    parser: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) { root.handleMutationLine(line) }
     }
   }
 

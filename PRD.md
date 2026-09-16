@@ -6,7 +6,7 @@ Hypr Herdr integra los spaces y panes de Herdr con el escritorio de Omarchy sin 
 
 Para Hyprland y Omarchy, el space Herdr activo es el workspace numérico arrendado. Por eso los bindings `SUPER+1..9`, la barra de workspaces y la navegación normal siguen funcionando sin redirecciones ni widgets sustitutos. Cada pane se presenta como una terminal conectada a su PTY real mediante `herdr terminal attach`.
 
-Un sidebar nativo de Omarchy permite cambiar de space, inspeccionar panes y ver el estado de los agentes. Hyprland conserva el layout, tamaño y posición de las ventanas; Herdr conserva procesos, sesiones y agentes.
+Un sidebar nativo de Omarchy permite cambiar de space y ver los agentes globales. Hyprland conserva el layout, tamaño y posición de las ventanas; Herdr conserva procesos, sesiones y agentes.
 
 ## Estado de la arquitectura
 
@@ -218,12 +218,14 @@ El sidebar es una superficie `PanelWindow` de Quickshell con layer-shell:
 
 - Se muestra cuando el workspace enfocado tiene un nombre `herdr:*`, sin depender de que su ID sea interno o arrendado.
 - Se oculta en workspaces numéricos originales, especiales o ajenos al plugin.
-- Reserva un ancho constante mediante su zona exclusiva.
+- Reserva mediante su zona exclusiva un ancho ajustable desde el borde derecho.
+- Persiste el ancho como proporción del monitor, con límites mínimos y máximos en unidades lógicas.
 - No forma parte del árbol de ventanas de Hyprland.
 - Conserva posición y apariencia durante el cambio de space.
 - Usa `Color`, `Style` y componentes compartidos de Omarchy.
+- Deriva los textos secundarios de `Color.popups.text` con `Util.alpha` (α = 0.65) para garantizar contraste ≥ 4.5:1 sobre el fondo del sidebar en cualquier tema; nunca usa `Color.muted` para texto.
 
-La primera versión crea un sidebar nuevo. El sidebar original de Herdr forma parte de su TUI y no tiene una interfaz pública para incrustarlo en Quickshell.
+La primera versión crea un sidebar nuevo con la misma jerarquía conceptual del original: spaces arriba y agentes globales abajo. El sidebar original de Herdr forma parte de su TUI y no tiene una interfaz pública para incrustarlo en Quickshell.
 
 ## Experiencia de usuario
 
@@ -247,13 +249,16 @@ El camino interactivo no consulta disco, no lanza terminales y no mueve ventanas
 
 ### Salida
 
+- Cerrar/detach es `release()`: el space vuelve a su home ID, el workspace original se restaura y la sidebar se oculta. El plugin permanece cargado y conectado, así que reabrir es inmediato.
+- `close()` o `omarchy-shell shell hide` solo ocultan la vista; no liberan el arriendo. La sidebar reaparece al enfocar el workspace arrendado.
 - Navegar con bindings normales abandona visualmente Herdr, pero conserva el portal para volver al slot.
 - Invocar la acción de Herdr desde el workspace Herdr que posee el slot ejecuta `release()` y restaura el workspace original.
-- Deshabilitar el plugin requiere una liberación explícita o el procedimiento de recuperación documentado.
+- `SUPER+W` conserva su comportamiento nativo de cerrar ventana: la sidebar es una layer-shell sin foco de teclado y los bindings del compositor no llegan a ella. El gesto de detach es el binding de entrada de Herdr, que actúa como toggle desde el slot arrendado.
+- Habilitar y deshabilitar el plugin es instalación, no uso diario. `disable` requiere una liberación explícita o el procedimiento de recuperación documentado.
 
-### Panes
+### Agentes y panes
 
-Cada fila de pane muestra título, directorio cuando aporte contexto, tab de origen, estado del agente e indicador de ventana conectada.
+Cada fila de agente muestra estado, space, tab cuando sea relevante y nombre del agente. La lista es global y prioriza estados accionables como `blocked`; seleccionar un agente enfoca la ventana de su pane.
 
 Seleccionar un pane enfoca su ventana dentro del workspace Herdr activo. Si la ventana se cerró, el plugin la recrea y ejecuta:
 
@@ -262,6 +267,8 @@ herdr terminal attach <terminal_id> --takeover
 ```
 
 Cerrar la ventana desmonta la vista, pero no cierra el pane ni el proceso administrado por Herdr. Una ventana recreada vuelve al layout como una ventana nueva; la primera versión no restaura su antigua posición después de un cierre manual.
+
+`herdr terminal attach --takeover` puede activar mouse reporting dentro de la aplicación terminal. En ese caso la selección de texto usa el modificador de bypass del emulador, normalmente `Shift` más arrastre. El plugin no instala mappings específicos de Kitty, Alacritty, Foot o Ghostty.
 
 ### Aplicaciones GUI
 
@@ -293,7 +300,7 @@ El panel usa `Quickshell.Hyprland` para observar:
 - Clase o `app-id` de las terminales adjuntas.
 - Confirmaciones necesarias para cada transición de leasing.
 
-Usa dispatchers de Hyprland para cambiar IDs, renombrar y enfocar workspaces y ventanas. El plugin no usa `hyprctl` para polling.
+Usa dispatchers de Hyprland para cambiar IDs, renombrar y enfocar workspaces y ventanas. El modelo de `Quickshell.Hyprland` puede conservar objetos obsoletos tras `change_id`, así que el lease consulta `hyprctl -j workspaces` y `hyprctl -j activeworkspace` como fuente autoritativa para sus decisiones; el resto del plugin no usa `hyprctl` para polling.
 
 ### Reconciliación de terminales
 
@@ -304,6 +311,7 @@ Cada pane vivo debe tener como máximo una ventana `direct attach`:
 - Al recibir `pane.closed`, cierra únicamente la ventana que representa ese pane.
 - Al recibir `pane.moved`, mueve o recrea la ventana en el workspace del space de destino.
 - Antes de crear una ventana, comprueba su `app-id` para evitar duplicados.
+- Durante hot reload conserva en memoria la relación entre `app-id` y `terminal_id`; no adopta silenciosamente una vista conocida para otra generación del terminal.
 
 El plugin lanza la terminal configurada por el usuario mediante `xdg-terminal-exec --app-id`, dentro de la sesión gráfica con `uwsm-app`. No asume Kitty, Alacritty, Foot ni Ghostty.
 
@@ -492,4 +500,5 @@ Además del spike, la implementación se probará con:
 - La sincronización usa sockets y eventos, no polling.
 - La integración usa un plugin oficial de Omarchy sin extensiones nativas adicionales.
 - Los workspaces vacíos son desechables y se recrean desde metadata leased.
+- El plugin permanece habilitado durante el uso normal: `openLast`/`release` son los gestos de abrir y cerrar, y `enable`/`disable` quedan reservados a la instalación.
 - Workspace Slot Leasing queda habilitado por el spike.

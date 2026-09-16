@@ -46,7 +46,7 @@ This repository is an early implementation. The existing vertical slice provides
 - Herdr protocol 20 snapshots over its Unix socket.
 - Event subscriptions with debounced authoritative refreshes.
 - Reconnection with bounded exponential backoff.
-- A themed layer-shell sidebar for spaces, tabs, panes, and agent states.
+- A themed, resizable layer-shell sidebar for spaces and global agent states.
 - Event-driven preparation with one managed terminal window per Herdr pane.
 - Omarchy IPC methods for navigation and diagnostics.
 
@@ -96,10 +96,40 @@ qmllint -I /usr/share/omarchy/shell -I /usr/lib/qt6/qml Panel.qml HerdrClient.qm
 bash tests/smoke.sh
 bash tests/panel-smoke.sh
 bash tests/lease-coordinator-smoke.sh
+bash tests/lease-repeat-smoke.sh
 bash tests/workspace-manager-smoke.sh
 ```
 
-Then symlink or clone it as `~/.config/omarchy/plugins/guillermodsm.hypr-herdr` and enable it with Omarchy's standard plugin command.
+Then install the checkout as a real directory and enable it once:
+
+```bash
+tests/dev.sh sync
+omarchy-shell shell rescanPlugins
+omarchy plugin enable guillermodsm.hypr-herdr
+```
+
+The plugin directory must be a real directory, not a symlink: Omarchy hot-reloads plugin code with an `inotifywait -r` watcher that does not traverse symlinked plugin folders. During iteration keep the plugin enabled and sync the checkout after each save:
+
+```bash
+tests/dev.sh sync     # one-shot copy
+tests/dev.sh watch    # copy on every save (Ctrl+C to stop)
+```
+
+Omarchy reloads the panel automatically when files change under `~/.config/omarchy/plugins/`; if a changed QML component remains cached, `tests/dev.sh reload` restarts `omarchy-shell` through Omarchy's official command. Managed terminal windows remain in Hyprland and are adopted by the new shell instance. `tests/dev.sh` also exposes `open`, `release`, `status`, `hide`, `show`, `enable` and `disable`.
+
+## Development lifecycle
+
+Three planes stay independent:
+
+- **Installation.** `omarchy plugin enable/disable` is installation only. With `keepLoaded`, the plugin stays mounted between summons, so opening and closing Herdr never requires enable/disable. `disable` requires releasing the lease first.
+- **Lease.** `openLast` from a numeric workspace exposes the last Herdr space in that slot. `release` (or the same `openLast` toggle from the leased workspace) detaches: the space returns to its home ID, the original workspace is restored, and the sidebar hides. The plugin remains loaded and connected, so reopening is immediate.
+- **View.** `close` or `omarchy-shell shell hide guillermodsm.hypr-herdr` only hides the sidebar. It never releases the lease; the sidebar reappears when the leased workspace is focused again.
+
+The sidebar mirrors Herdr's hierarchy: spaces are listed at the top and agents at the bottom. Drag its right edge to resize it. The saved value is a fraction of the current monitor width, clamped to practical minimum and maximum sizes, so it remains usable after a resolution or scale change.
+
+Direct attach applications may enable terminal mouse reporting. In that mode, use the terminal emulator's bypass modifier to select text, commonly `Shift` while dragging. Hypr Herdr launches the user's configured terminal through `xdg-terminal-exec` and does not install emulator-specific mouse mappings.
+
+`SUPER+W` keeps its native "Close window" behavior. The sidebar is a layer-shell surface with no keyboard focus, so compositor bindings never reach it. Detach is the Herdr entry binding, which acts as a toggle from the leased workspace.
 
 ## IPC
 
@@ -112,9 +142,11 @@ omarchy-shell guillermodsm.hypr-herdr focusPane w1:p1
 omarchy-shell guillermodsm.hypr-herdr release
 omarchy-shell guillermodsm.hypr-herdr status
 omarchy-shell guillermodsm.hypr-herdr reconcile
+omarchy-shell guillermodsm.hypr-herdr close
+omarchy-shell guillermodsm.hypr-herdr show
 ```
 
-From a regular numeric workspace, `openLast` acquires that slot or migrates the existing lease to it. From the Herdr workspace that owns the slot, `openLast` acts as a toggle and releases the lease. `openSpace` switches the owner of the leased slot, or migrates the lease when invoked from another numeric slot. If preparation is still running, retry after `status` reports `preparation.state` as `ready`. `release` returns the active Herdr space to its home ID and restores the original workspace.
+From a regular numeric workspace, `openLast` acquires that slot or migrates the existing lease to it. From the Herdr workspace that owns the slot, `openLast` acts as a toggle and releases the lease. `openSpace` switches the owner of the leased slot, or migrates the lease when invoked from another numeric slot. If preparation is still running, retry after `status` reports `preparation.state` as `ready`. `release` returns the active Herdr space to its home ID, restores the original workspace and closes the sidebar view. `close` only hides the sidebar view; `show` brings it back without touching the lease.
 
 The default Herdr socket is `~/.config/herdr/herdr.sock`. `HERDR_SOCKET_PATH` takes precedence, and `HERDR_SESSION` selects `~/.config/herdr/sessions/<name>/herdr.sock` for named sessions.
 
@@ -155,6 +187,7 @@ An emergency recovery command remains Sprint 4 work. Until then, Workspace Slot 
 - The first leasing version supports one global slot, not one slot per monitor.
 - A manually closed pane window is recreated only when its pane or space is selected again.
 - Existing pane windows are adopted only by their exact stable `app-id`; foreign windows are never closed.
+- In-process shell reloads retain the pane-to-terminal attachment inventory, so existing windows are not silently adopted for a different `terminal_id`.
 - Incremental events trigger a fresh snapshot rather than mutating the local model in place.
 
 ## License

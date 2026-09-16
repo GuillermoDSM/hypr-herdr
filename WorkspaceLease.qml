@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Hyprland
+import Quickshell.Io
 import "IdCodec.js" as IdCodec
 import "LeaseCodec.js" as LeaseCodec
 
@@ -25,53 +26,28 @@ Item {
   property int pendingSlotId: 0
   property string pendingPreviousParkedName: ""
   property int verificationAttempts: 0
-  property var staleParkedNames: ({})
+  property var liveWorkspaces: []
+  property int liveFocusedId: 0
+  property bool liveRefreshQueued: false
 
   readonly property bool active: slotId > 0 && ownerSpaceId !== ""
 
   signal operationFinished(string operation, bool success, string message)
 
   function workspaceValues() {
-    var source = Hyprland.workspaces.values
-    var result = []
-    var indexes = {}
-    for (var i = 0; i < source.length; i++) {
-      var id = workspaceId(source[i])
-      var key = String(id)
-      if (indexes[key] === undefined) {
-        indexes[key] = result.length
-        result.push(source[i])
-      } else {
-        var index = indexes[key]
-        if (workspaceSnapshotScore(source[i]) > workspaceSnapshotScore(result[index]))
-          result[index] = source[i]
-      }
-    }
-    return result
-  }
-
-  function workspaceSnapshotScore(workspace) {
-    var ipc = workspace ? (workspace.lastIpcObject || {}) : {}
-    var score = 0
-    if (ipc.id !== undefined && Number(workspace.id) === Number(ipc.id)) score++
-    if (ipc.name !== undefined && String(workspace.name || "") === String(ipc.name)) score++
-    return score
+    return liveWorkspaces
   }
 
   function workspaceId(workspace) {
-    var ipc = workspace ? (workspace.lastIpcObject || {}) : {}
-    return Number(ipc.id !== undefined ? ipc.id : (workspace ? workspace.id : 0))
+    return workspace ? Number(workspace.id || 0) : 0
   }
 
   function workspaceName(workspace) {
-    var ipc = workspace ? (workspace.lastIpcObject || {}) : {}
-    return String(ipc.name !== undefined ? ipc.name : (workspace ? workspace.name || "" : ""))
+    return workspace ? String(workspace.name || "") : ""
   }
 
   function workspaceWindowCount(workspace) {
-    var ipc = workspace ? (workspace.lastIpcObject || {}) : {}
-    if (ipc.windows !== undefined) return Number(ipc.windows)
-    return workspace && workspace.toplevels ? workspace.toplevels.values.length : 0
+    return workspace && workspace.windows !== undefined ? Number(workspace.windows) : 0
   }
 
   function workspaceById(id) {
@@ -80,6 +56,19 @@ Item {
       if (workspaceId(values[i]) === Number(id)) return values[i]
     }
     return null
+  }
+
+  function focusedWorkspace() {
+    return workspaceById(liveFocusedId)
+  }
+
+  function refreshLive() {
+    if (liveQuery.running || focusedQuery.running) {
+      liveRefreshQueued = true
+      return
+    }
+    liveQuery.running = true
+    focusedQuery.running = true
   }
 
   function workspaceByName(name) {
@@ -162,8 +151,7 @@ Item {
     pendingSpaceId = String(spaceId || "")
     pendingSlotId = Number(slot || 0)
     verificationAttempts = 0
-    Hyprland.refreshWorkspaces()
-    Hyprland.refreshToplevels()
+    refreshLive()
     verifyTimer.restart()
     return "requested"
   }
@@ -181,7 +169,7 @@ Item {
     reconcile()
     if (active) return switchSpace(spaceId)
 
-    var source = Hyprland.focusedWorkspace
+    var source = focusedWorkspace()
     var slot = workspaceId(source)
     if (slot < minimumSlotId || slot > maximumSlotId)
       return fail("open Hypr Herdr from a numeric workspace slot")
@@ -257,7 +245,7 @@ Item {
     reconcile()
     if (!active) return acquire(spaceId)
 
-    var source = Hyprland.focusedWorkspace
+    var source = focusedWorkspace()
     var newSlot = workspaceId(source)
     if (newSlot < minimumSlotId || newSlot > maximumSlotId || newSlot === slotId)
       return switchSpace(spaceId)
@@ -338,7 +326,7 @@ Item {
 
   function toggle(spaceId) {
     reconcile()
-    var current = Hyprland.focusedWorkspace
+    var current = focusedWorkspace()
     if (active && current && workspaceId(current) === slotId
         && spaceIdForName(workspaceName(current)) === ownerSpaceId)
       return release()
@@ -351,7 +339,7 @@ Item {
   function openSpace(spaceId) {
     reconcile()
     if (!active) return acquire(spaceId)
-    var current = Hyprland.focusedWorkspace
+    var current = focusedWorkspace()
     var currentId = workspaceId(current)
     if (currentId >= minimumSlotId && currentId <= maximumSlotId && currentId !== slotId)
       return migrate(spaceId)
@@ -367,8 +355,7 @@ Item {
       if (parsed && parsed.leased) found.push({ workspace: values[i], parsed: parsed })
       var parkedState = LeaseCodec.parseParked(workspaceName(values[i]))
       var parkedName = workspaceName(values[i])
-      if (parkedState && !staleParkedNames[parkedName]
-          && !(busy && parkedName === pendingPreviousParkedName))
+      if (parkedState && !(busy && parkedName === pendingPreviousParkedName))
         parked.push({ workspace: values[i], parsed: parkedState })
     }
 
@@ -400,6 +387,7 @@ Item {
       }
       if (!busy) {
         phase = "idle"
+        errorMessage = ""
         recoveryRequired = false
       }
       return true
@@ -446,17 +434,105 @@ Item {
     }
     leasedWorkspaceName = workspaceName(item.workspace)
     parkedWorkspaceName = LeaseCodec.parkedName(slotId, item.parsed.encodedOriginalName, parkingId)
-    if (!busy) phase = "active"
+    if (!busy) {
+      phase = "active"
+      errorMessage = ""
+      recoveryRequired = false
+    }
     return true
   }
 
-  Component.onCompleted: reconcile()
+  function liveEventRelevant(name) {
+    return name.indexOf("workspace") !== -1 || name === "focusedmon"
+      || name === "openwindow" || name === "closewindow" || name === "movewindowv2"
+      || name === "activewindowv2"
+  }
+
+  Component.onCompleted: {
+    refreshLive()
+    reconcile()
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var name = String((event && (event.name || event.event)) || "")
+      if (!liveEventRelevant(name)) return
+      liveRefreshTimer.restart()
+      if (!root.busy) reconcileTimer.restart()
+    }
+  }
+
+  Timer {
+    id: liveRefreshTimer
+    interval: 60
+    repeat: false
+    onTriggered: root.refreshLive()
+  }
+
+  Timer {
+    id: reconcileTimer
+    interval: 80
+    repeat: false
+    onTriggered: root.reconcile()
+  }
+
+  Process {
+    id: liveQuery
+    command: ["hyprctl", "-j", "workspaces"]
+    stdout: StdioCollector { id: liveStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) return
+      try {
+        var parsed = JSON.parse(String(liveStdout.text || "[]"))
+        var next = []
+        for (var i = 0; i < parsed.length; i++) {
+          next.push({
+            id: Number(parsed[i].id),
+            name: String(parsed[i].name || ""),
+            windows: Number(parsed[i].windows || 0)
+          })
+        }
+        root.liveWorkspaces = next
+        if (root.liveRefreshQueued) {
+          root.liveRefreshQueued = false
+          root.refreshLive()
+        }
+        if (!root.busy) reconcileTimer.restart()
+      } catch (error) {
+        console.warn("hypr-herdr: could not parse workspace list:", error)
+      }
+    }
+  }
+
+  Process {
+    id: focusedQuery
+    command: ["hyprctl", "-j", "activeworkspace"]
+    stdout: StdioCollector { id: focusedStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) return
+      try {
+        var parsed = JSON.parse(String(focusedStdout.text || "{}"))
+        root.liveFocusedId = Number(parsed.id || 0)
+        if (root.liveRefreshQueued) {
+          root.liveRefreshQueued = false
+          root.refreshLive()
+        }
+      } catch (error) {
+        console.warn("hypr-herdr: could not parse active workspace:", error)
+      }
+    }
+  }
 
   Timer {
     id: verifyTimer
     interval: 50
     repeat: false
     onTriggered: {
+      if (liveQuery.running || focusedQuery.running || root.liveRefreshQueued) {
+        restart()
+        return
+      }
       var operation = root.pendingOperation
       var expectedSpace = root.pendingSpaceId
       var expectedSlot = root.pendingSlotId
@@ -465,8 +541,7 @@ Item {
         ? !root.active
         : root.active && root.ownerSpaceId === expectedSpace && root.slotId === expectedSlot)
       if (!success && ++root.verificationAttempts < 20) {
-        Hyprland.refreshWorkspaces()
-        Hyprland.refreshToplevels()
+        root.refreshLive()
         restart()
         return
       }
@@ -477,11 +552,6 @@ Item {
         root.recoveryRequired = true
       } else if (operation === "release") {
         root.recoveryRequired = false
-      }
-      if (success && root.pendingPreviousParkedName !== "") {
-        var ignored = Object.assign({}, root.staleParkedNames)
-        ignored[root.pendingPreviousParkedName] = true
-        root.staleParkedNames = ignored
       }
       root.pendingOperation = ""
       root.pendingSpaceId = ""
