@@ -61,7 +61,7 @@ done
 dispatch "hl.dsp.workspace.rename({ workspace = ${homes[0]}, name = \"herdr:bWFuYWdlci1zbW9rZS1h\" })"
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-cp "$repo_dir/WorkspaceManager.qml" "$repo_dir/IdCodec.js" "$repo_dir/LayoutSync.js" "$repo_dir/LeaseCodec.js" "$repo_dir/tests/WorkspaceManagerSmoke.qml" "$tmp_dir/"
+cp "$repo_dir/WorkspaceManager.qml" "$repo_dir/AttachConfig.js" "$repo_dir/IdCodec.js" "$repo_dir/LayoutSync.js" "$repo_dir/LeaseCodec.js" "$repo_dir/tests/WorkspaceManagerSmoke.qml" "$tmp_dir/"
 
 output=$(HYPR_HERDR_TEST_LAUNCHER="$launcher" timeout 15s quickshell --no-color -p "$tmp_dir/WorkspaceManagerSmoke.qml" 2>&1)
 printf '%s\n' "$output"

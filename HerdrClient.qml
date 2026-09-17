@@ -6,7 +6,7 @@ Item {
   id: root
   visible: false
 
-  readonly property int supportedProtocol: 20
+  readonly property var supportedProtocols: [20, 22]
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || home + "/.config"
   readonly property string sessionName: Quickshell.env("HERDR_SESSION") || ""
@@ -66,6 +66,10 @@ Item {
       if (paneId !== "") result.push({ type: "pane.agent_status_changed", pane_id: paneId })
     }
     return result
+  }
+
+  function protocolSupported(value) {
+    return supportedProtocols.indexOf(Number(value)) !== -1
   }
 
   function subscribe() {
@@ -174,9 +178,9 @@ Item {
 
     protocol = Number(snapshot.protocol || 0)
     serverVersion = String(snapshot.version || "")
-    if (protocol !== supportedProtocol) {
+    if (!protocolSupported(protocol)) {
       state = "incompatible"
-      errorMessage = "Herdr protocol " + protocol + " is not supported (expected " + supportedProtocol + ")"
+      errorMessage = "Herdr protocol " + protocol + " is not supported (expected 20 or 22)"
       eventWanted = false
       return
     }

@@ -21,7 +21,7 @@ Estados: `[x]` hecho, `[ ]` pendiente.
 ### US-002 - Cliente Herdr
 
 - [x] Resolver socket por `HERDR_SOCKET_PATH`, `HERDR_SESSION` y XDG.
-- [x] Consumir `session.snapshot` del protocolo 20.
+- [x] Consumir `session.snapshot` de los protocolos 20 y 22.
 - [x] Suscribirse a eventos de spaces, tabs, panes y agentes.
 - [x] Refrescar por snapshot autoritativo con debounce.
 - [x] Reconectar con backoff y mostrar incompatibilidad o desconexión.

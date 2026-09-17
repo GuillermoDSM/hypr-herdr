@@ -10,7 +10,7 @@ ShellRoot {
     onSnapshotApplied: {
       var encoded = IdCodec.encode("w1")
       var lease = LeaseCodec.parseHerdr(LeaseCodec.leasedName(1000000001, encoded, 2, IdCodec.encode("2"), 2000000002))
-      if (state === "ready" && protocol === 20
+      if (state === "ready" && (protocol === 20 || protocol === 22)
           && IdCodec.workspaceName("w1") === "herdr:dzE"
           && IdCodec.decode(encoded) === "w1"
           && layouts.length === tabs.length

@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import "AttachConfig.js" as AttachConfig
 import "IdCodec.js" as IdCodec
 import "LayoutSync.js" as LayoutSync
 import "LeaseCodec.js" as LeaseCodec
@@ -48,6 +49,8 @@ Item {
   property string lastRatioUpdateKey: ""
 
   readonly property string layoutSettingsPath: Quickshell.statePath("hypr-herdr-layouts.json")
+  readonly property string herdrConfigPath: Quickshell.env("HOME") + "/.config/herdr/config.toml"
+  readonly property string attachConfigPath: Quickshell.statePath("hypr-herdr-attach.toml")
 
   readonly property bool preparing: enabled && state === "preparing"
   readonly property bool ready: enabled && state === "ready"
@@ -72,6 +75,31 @@ Item {
     printErrors: false
     onLoaded: root.loadLayoutSettings(text())
     onLoadFailed: root.loadLayoutSettings("")
+  }
+
+  // Managed attach clients get a copy of the user's Herdr config with mouse
+  // capture disabled, so terminal windows select and copy like any other
+  // terminal without touching the global Herdr configuration.
+  FileView {
+    id: herdrConfigFile
+    path: root.herdrConfigPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.refreshAttachConfig()
+    onLoadFailed: root.refreshAttachConfig()
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: attachConfigFile
+    path: root.attachConfigPath
+    atomicWrites: true
+    printErrors: false
+  }
+
+  function refreshAttachConfig() {
+    var merged = AttachConfig.mergeMouseCapture(herdrConfigFile.text())
+    if (merged !== attachConfigFile.text()) attachConfigFile.setText(merged)
   }
 
   function loadLayoutSettings(raw) {
@@ -493,8 +521,10 @@ Item {
     var cwd = String(pane.cwd || Quickshell.env("HOME") || "/")
     if (testLauncher !== "")
       return [testLauncher, appId, title, cwd, terminalId].map(shellQuote).join(" ")
+    refreshAttachConfig()
     return ["uwsm-app", "--", "xdg-terminal-exec", "--app-id=" + appId,
-            "--title=" + title, "--dir=" + cwd, "--", "herdr", "terminal", "attach",
+            "--title=" + title, "--dir=" + cwd, "--", "env",
+            "HERDR_CONFIG_PATH=" + root.attachConfigPath, "herdr", "terminal", "attach",
             terminalId, "--takeover"].map(shellQuote).join(" ")
   }
 

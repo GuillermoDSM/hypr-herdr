@@ -43,7 +43,7 @@ Herdr IDs remain opaque and are encoded as base64url. Space `w1` with home ID `1
 
 This repository is an early implementation. The existing vertical slice provides:
 
-- Herdr protocol 20 snapshots over its Unix socket.
+- Herdr protocol 20 and 22 snapshots over its Unix socket.
 - Event subscriptions with debounced authoritative refreshes.
 - Reconnection with bounded exponential backoff.
 - A themed, resizable layer-shell sidebar for spaces and global agent states.
@@ -55,7 +55,7 @@ The Workspace Slot Leasing spike is complete with a go decision. Empty workspace
 ## Requirements
 
 - Omarchy 4 with plugin schema version 1.
-- Herdr 0.8.2 with protocol 20.
+- Herdr 0.8.2 (protocol 20) or Herdr 0.9.1 (protocol 22).
 - Quickshell with `Quickshell.Io.Socket` and `Quickshell.Hyprland`.
 - Hyprland 0.56 or a compatible version exposing `hl.dsp.workspace.change_id`.
 - `xdg-terminal-exec` and `uwsm-app` for managed terminal windows.

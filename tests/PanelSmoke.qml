@@ -55,7 +55,7 @@ ShellRoot {
         var wide = JSON.parse(panel.statusJson()).panel
         clampOk = narrow.width === narrow.minWidth && wide.width === wide.maxWidth
       }
-      if (status.state === "ready" && status.protocol === 20
+      if (status.state === "ready" && (status.protocol === 20 || status.protocol === 22)
           && status.agents >= 0
           && status.layouts >= 0
           && status.panel.width >= status.panel.minWidth

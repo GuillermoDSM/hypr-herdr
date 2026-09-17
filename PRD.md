@@ -385,7 +385,7 @@ No se modificarán `SUPER+1..9`, el widget estándar ni archivos bajo `/usr/shar
 - Omarchy con plugins schema version 1.
 - Quickshell con `Quickshell.Io.Socket` y `Quickshell.Hyprland`.
 - Hyprland 0.56 o compatible con dispatchers Lua y `hl.dsp.workspace.change_id`.
-- Herdr 0.8.2 o una versión compatible con protocolo 20.
+- Herdr 0.8.2 con protocolo 20 o Herdr 0.9.1 con protocolo 22.
 - `xdg-terminal-exec` y `uwsm-app`.
 
 El plugin debe detectar capacidades antes de iniciar un arriendo. Si `change_id` o el protocolo de Herdr no son compatibles, muestra el error y no modifica workspaces ni ventanas.
