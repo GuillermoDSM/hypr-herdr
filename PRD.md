@@ -12,6 +12,21 @@ Un sidebar nativo de Omarchy permite cambiar de space y ver los agentes globales
 
 El spike de septiembre de 2026 produjo **GO con workspaces vacíos desechables**. Los workspaces con ventanas se conservan completos; si un original vacío desaparece al perder foco, el lease guarda su identidad y `release()` lo recrea. No se usan reglas `persistent`. La navegación relativa hacia IDs internos se acepta en v0.1. Evidencia: [SLOT_LEASING_SPIKE.md](SLOT_LEASING_SPIKE.md).
 
+## Estado actual
+
+La vertical slice está operativa en Omarchy, pero todavía no se considera un release v0.1. La última validación local usa Herdr 0.9.1 con protocolo 22 y confirma:
+
+- 6 spaces, 6 tabs, 11 panes y 11 terminales `direct attach` reconciliadas.
+- Sidebar visible en el workspace arrendado y lease activo con acquire/release funcional.
+- Sincronización inicial de layout BSP de Hyprland hacia los ratios de Herdr y persistencia de layouts inicializados.
+- Sidebar con ancho mínimo de 160 unidades lógicas, solape anti-franja para escalas fraccionarias y contraste validado.
+- Configuración de mouse aislada por attach mediante `HERDR_CONFIG_PATH`; la configuración global de Herdr no se modifica.
+- Compatibilidad explícita con los protocolos 20 y 22; protocolos desconocidos siguen bloqueando el cliente.
+
+La suite local pasa `omarchy plugin validate`, `qmllint`, smoke del cliente, panel, leases, workspaces y configuración de attach. La implementación funcional está publicada en la rama principal; esta documentación se actualiza junto con ella.
+
+Las limitaciones abiertas son la reconexión automática después de reiniciar el proceso servidor de Herdr, la recuperación completa de transacciones parciales y la validación manual del comportamiento de selección/click en terminales y aplicaciones que implementan su propio mouse reporting.
+
 ## Objetivo
 
 Convertir Herdr en una capa de sesión y navegación integrada con Omarchy:
@@ -217,7 +232,7 @@ Al iniciar o recargar, el coordinador inspecciona workspaces y nombres antes de 
 El sidebar es una superficie `PanelWindow` de Quickshell con layer-shell:
 
 - Se muestra cuando el workspace enfocado tiene un nombre `herdr:*`, sin depender de que su ID sea interno o arrendado.
-- Se oculta en workspaces numéricos originales, especiales o ajenos al plugin.
+- Se oculta en workspaces numéricos originales, especiales o ajenos al plugin, salvo el estado vacío solicitado para crear el primer space.
 - Reserva mediante su zona exclusiva un ancho ajustable desde el borde derecho.
 - Persiste el ancho como proporción del monitor, con límites mínimos y máximos en unidades lógicas (160–620; escalan con el tema).
 - Con escalas fraccionarias solapa una unidad lógica con la barra para que el redondeo de píxeles no deje una franja visible entre ambas (también cubre barras inferiores).
@@ -226,7 +241,7 @@ El sidebar es una superficie `PanelWindow` de Quickshell con layer-shell:
 - Usa `Color`, `Style` y componentes compartidos de Omarchy.
 - Deriva los textos secundarios de `Color.popups.text` con `Util.alpha` (α = 0.65) para garantizar contraste ≥ 4.5:1 sobre el fondo del sidebar en cualquier tema; nunca usa `Color.muted` para texto.
 
-La primera versión crea un sidebar nuevo con la misma jerarquía conceptual del original: spaces arriba y agentes globales abajo. El sidebar original de Herdr forma parte de su TUI y no tiene una interfaz pública para incrustarlo en Quickshell.
+La primera versión crea un sidebar nuevo con la misma jerarquía conceptual del original: spaces arriba y agentes globales abajo. La mitad inferior queda reservada para agents, mientras spaces y el botón `New` ocupan la mitad superior. Las filas son compactas; el nombre del proyecto (`workspace.label`) tiene más contraste que el nombre del agent. El sidebar original de Herdr forma parte de su TUI y no tiene una interfaz pública para incrustarlo en Quickshell.
 
 ## Experiencia de usuario
 
@@ -240,7 +255,7 @@ La primera versión crea un sidebar nuevo con la misma jerarquía conceptual del
 4. El sidebar aparece con la selección confirmada por Hyprland.
 5. Si el workspace actual ya es el propietario Herdr del slot, la misma acción ejecuta `release()` y restaura el workspace original.
 
-Si Herdr no tiene spaces, el plugin no aparca el workspace actual. Muestra un estado vacío y una acción para abrir Herdr o crear el primer space, según la API pública instalada.
+Si Herdr no tiene spaces, el plugin no aparca el workspace actual. Muestra un estado vacío y el botón `New`, que crea el primer space con el `cwd` actual y una terminal inicial.
 
 ### Cambio de space
 
@@ -259,17 +274,19 @@ El camino interactivo no consulta disco, no lanza terminales y no mueve ventanas
 
 ### Agentes y panes
 
-Cada fila de agente muestra estado, space, tab cuando sea relevante y nombre del agente. La lista es global y prioriza estados accionables como `blocked`; seleccionar un agente enfoca la ventana de su pane.
+Cada fila de agente muestra estado, space, tab cuando sea relevante y nombre del agente. El proyecto/space se muestra con mayor contraste y el nombre del agente como texto secundario. La lista es global y prioriza estados accionables como `blocked`; seleccionar un agente enfoca la ventana de su pane.
 
 Seleccionar un pane enfoca su ventana dentro del workspace Herdr activo. Si la ventana se cerró, el plugin la recrea y ejecuta:
 
 ```sh
-herdr terminal attach <terminal_id> --takeover
+env HERDR_CONFIG_PATH=<hypr-herdr-attach.toml> herdr terminal attach <terminal_id> --takeover
 ```
 
 Cerrar la ventana desmonta la vista, pero no cierra el pane ni el proceso administrado por Herdr. Una ventana recreada vuelve al layout como una ventana nueva; la primera versión no restaura su antigua posición después de un cierre manual.
 
-`herdr terminal attach --takeover` puede activar mouse reporting dentro de la aplicación terminal. En ese caso la selección de texto usa el modificador de bypass del emulador, normalmente `Shift` más arrastre. El plugin no instala mappings específicos de Kitty, Alacritty, Foot o Ghostty.
+El plugin genera `hypr-herdr-attach.toml` en el estado de Quickshell y lo pasa mediante `HERDR_CONFIG_PATH`, sin modificar el `config.toml` global del usuario. Si la configuración global no define explícitamente `ui.mouse_capture`, la copia de los attaches añade `mouse_capture = false` para que las ventanas se comporten como terminales normales. Una configuración explícita del usuario se conserva. Esta ruta requiere Herdr 0.9.0 o posterior; Herdr 0.8.2 fuerza la captura en direct attach.
+
+`herdr terminal attach --takeover` también puede activar mouse reporting dentro de la aplicación terminal. En ese caso la selección de texto usa el modificador de bypass del emulador, normalmente `Shift` más arrastre. El plugin no instala mappings específicos de Kitty, Alacritty, Foot o Ghostty y la validación manual por aplicación sigue pendiente.
 
 ### Aplicaciones GUI
 
@@ -290,6 +307,8 @@ El panel usa `Quickshell.Io.Socket` para conectarse al socket Unix publicado por
 La suscripción incluye eventos de creación, cierre, movimiento, cambio de nombre, foco y estado de agente. No ejecuta polling mientras el socket funcione.
 
 Si el socket se desconecta, el sidebar conserva el último estado, muestra que Herdr está desconectado e intenta reconectar con espera progresiva limitada. Tras reconectar solicita un snapshot completo.
+
+El backoff está implementado y funciona para errores transitorios. Un reinicio completo de `herdr server` puede dejar un objeto `Quickshell.Io.Socket` en estado inválido dentro del proceso actual de Quickshell; hoy la recuperación operativa es reiniciar `omarchy-shell`. La recreación explícita de sockets y una prueba de reinicio de Herdr quedan pendientes.
 
 ### Conexión con Hyprland
 
@@ -315,6 +334,10 @@ Cada pane vivo debe tener como máximo una ventana `direct attach`:
 - Durante hot reload conserva en memoria la relación entre `app-id` y `terminal_id`; no adopta silenciosamente una vista conocida para otra generación del terminal.
 
 El plugin lanza la terminal configurada por el usuario mediante `xdg-terminal-exec --app-id`, dentro de la sesión gráfica con `uwsm-app`. No asume Kitty, Alacritty, Foot ni Ghostty.
+
+### Sincronización de layout
+
+`WorkspaceManager` observa la geometría BSP de las ventanas gestionadas y la compara con el layout de Herdr. Cuando detecta una diferencia, traduce los splits de Hyprland a rutas y ratios y envía `layout.set_split_ratio` al pane correspondiente. La primera geometría de cada space se persiste para distinguir inicialización de cambios posteriores y evitar bucles de escritura. La sincronización está habilitada en el panel y fue verificada con un workspace de tres panes, incluyendo sincronización inversa y conservación de PTY.
 
 ## Rendimiento
 
@@ -344,6 +367,7 @@ hypr-herdr/
 ├── HerdrClient.qml
 ├── WorkspaceLease.qml
 ├── WorkspaceManager.qml
+├── AttachConfig.js
 ├── IdCodec.js
 ├── LeaseCodec.js
 ├── README.md
@@ -389,6 +413,7 @@ No se modificarán `SUPER+1..9`, el widget estándar ni archivos bajo `/usr/shar
 - `xdg-terminal-exec` y `uwsm-app`.
 
 El plugin debe detectar capacidades antes de iniciar un arriendo. Si `change_id` o el protocolo de Herdr no son compatibles, muestra el error y no modifica workspaces ni ventanas.
+La configuración de mouse por attach requiere Herdr 0.9.0 o posterior; con Herdr 0.8.2 se conserva el attach, pero no se puede desactivar su captura fija.
 
 ## Alcance de la primera versión
 
@@ -401,6 +426,9 @@ El plugin debe detectar capacidades antes de iniciar un arriendo. Si `change_id`
 - Sidebar persistente en el space Herdr activo.
 - Spaces, tabs, panes y estados de agentes desde el socket de Herdr.
 - Una terminal `direct attach` por pane.
+- Configuración de mouse por ventana mediante una copia de configuración en el estado del plugin.
+- Sincronización de ratios BSP entre Hyprland y Herdr.
+- Soporte de snapshots de protocolo 20 y 22.
 - Cambio inmediato entre spaces sin mover ventanas.
 - Foco y recreación de panes.
 - Integración con tema, barra, bindings y shell IPC nativos de Omarchy.
@@ -429,7 +457,7 @@ El plugin debe detectar capacidades antes de iniciar un arriendo. Si `change_id`
 - **Transacción parcial:** bloquear nuevos arriendos y ofrecer `release()` o recuperación de emergencia.
 - **Recarga de Omarchy:** reconstruir el arriendo desde nombres e IDs y adoptar las ventanas existentes.
 - **Plugin deshabilitado con un arriendo activo:** requerir liberación previa y documentar recuperación externa.
-- **Herdr no está ejecutándose:** conservar el arriendo existente, mostrar estado desconectado y permitir liberarlo.
+- **Herdr no está ejecutándose:** conservar el arriendo existente y mostrar estado desconectado; la reconexión después de reiniciar el servidor puede requerir reiniciar `omarchy-shell` hasta completar la recreación explícita de sockets.
 - **Pane sin `terminal_id`:** mostrarlo deshabilitado hasta recibir una actualización válida.
 - **Propietario directo existente:** usar `--takeover` solo para la ventana única administrada por Hypr Herdr.
 - **Terminal termina al iniciar:** conservar el pane en el sidebar y ofrecer reintento.
@@ -454,6 +482,12 @@ El plugin debe detectar capacidades antes de iniciar un arriendo. Si `change_id`
 14. Crear, cerrar, mover o renombrar elementos en Herdr actualiza el sidebar sin polling.
 15. El plugin funciona con el terminal configurado por `xdg-terminal-exec`.
 16. La configuración y el código no modifican `/usr/share/omarchy/`.
+17. El cliente acepta los protocolos Herdr 20 y 22 y rechaza protocolos desconocidos sin mutar workspaces.
+18. Las ventanas gestionadas pueden recibir una configuración de mouse aislada sin modificar el `config.toml` global de Herdr.
+19. El sidebar no muestra el título `HERDR` ni el resumen visual de cantidades de spaces/panes.
+20. Spaces y agents usan filas compactas y agents comienzan en la mitad inferior del sidebar.
+21. `New` crea un space mediante la API de Herdr, conserva el `cwd` actual y enfoca su terminal cuando la reconciliación termina.
+22. Crear un space no lanza una terminal independiente ni duplica el pane administrado por Herdr.
 
 ## Spike obligatorio
 
@@ -479,18 +513,26 @@ Si falla la atomicidad visual o la recuperación segura, la alternativa será un
 
 Además del spike, la implementación se probará con:
 
-- Un space con un pane.
-- Varios spaces con múltiples panes y tabs.
-- Agentes en estados `working`, `blocked`, `idle`, `done` y `unknown`.
-- Ventanas tiled, flotantes, agrupadas y fullscreen.
-- Cierre y recreación de una terminal adjunta.
-- Creación y cierre de panes mientras su workspace no está visible.
-- Cambio rápido y repetido entre spaces.
-- Liberación desde el slot y desde otro workspace.
-- Migración del portal a otro slot numérico.
-- Reinicio de Herdr y de `omarchy-shell`.
-- Kitty, Alacritty, Foot o Ghostty cuando estén disponibles.
-- Uno y varios monitores.
+### Validado en la vertical slice actual
+
+- Cliente Herdr 0.9.1: 6 spaces, 6 tabs, 11 panes, 6 layouts, 6 agentes y 11 terminales reconciliadas.
+- Acquire, switch, migrate, release y repetición del lease.
+- Reconciliación de workspaces y terminales con `app-id` estable.
+- Contraste del panel, límites de ancho y solape para escala fraccionaria.
+- Generación de configuración aislada para attach y compatibilidad de protocolo 22.
+
+### Pendiente para cerrar v0.1
+
+- Repetir manualmente la matriz de uno y varios spaces, tabs y panes con cambios rápidos.
+- Validar agentes en estados `working`, `blocked`, `idle`, `done` y `unknown` con contenido real.
+- Verificar tiled, flotante, agrupado, fullscreen y cierre/recreación de terminales sin perder el pane.
+- Validar creación, cierre y movimiento de panes mientras su workspace no está visible.
+- Probar selección, arrastre y click derecho en una terminal normal con la configuración aislada de mouse.
+- Documentar el comportamiento de aplicaciones como OpenCode que implementan su propio mouse reporting.
+- Recuperar automáticamente la conexión después de reiniciar `herdr server`, sin reiniciar `omarchy-shell`.
+- Completar recuperación de transacciones parciales y el comando de emergencia sin cargar el panel.
+- Probar Kitty, Alacritty, Foot o Ghostty cuando estén disponibles.
+- Revalidar uno y varios monitores y ejecutar todos los criterios de aceptación de este documento.
 
 ## Decisiones cerradas
 
@@ -501,5 +543,8 @@ Además del spike, la implementación se probará con:
 - La sincronización usa sockets y eventos, no polling.
 - La integración usa un plugin oficial de Omarchy sin extensiones nativas adicionales.
 - Los workspaces vacíos son desechables y se recrean desde metadata leased.
+- Los attaches gestionados usan una copia de configuración en el estado del plugin; la configuración global de Herdr permanece intacta.
+- Los protocolos Herdr 20 y 22 son compatibles; las versiones futuras requieren una decisión explícita antes de aceptarse.
+- La sincronización de layout escribe ratios en Herdr solo después de comparar el BSP de Hyprland y evita repetir la misma actualización.
 - El plugin permanece habilitado durante el uso normal: `openLast`/`release` son los gestos de abrir y cerrar, y `enable`/`disable` quedan reservados a la instalación.
 - Workspace Slot Leasing queda habilitado por el spike.

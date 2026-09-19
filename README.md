@@ -98,6 +98,9 @@ bash tests/panel-smoke.sh
 bash tests/lease-coordinator-smoke.sh
 bash tests/lease-repeat-smoke.sh
 bash tests/workspace-manager-smoke.sh
+bash tests/layout-sync-smoke.sh
+bash tests/attach-config-smoke.sh
+bash tests/workspace-create-smoke.sh
 ```
 
 Then install the checkout as a real directory and enable it once:

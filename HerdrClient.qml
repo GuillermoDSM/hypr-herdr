@@ -40,9 +40,13 @@ Item {
   property var mutationQueue: []
   property bool mutationWanted: false
   property string mutationId: ""
+  property var workspaceCreateRequest: ({})
+  property bool workspaceCreateWanted: false
 
   signal snapshotApplied()
   signal mutationFailed(string message)
+  signal workspaceCreated(string workspaceId)
+  signal workspaceCreateFailed(string message)
 
   function paneKey() {
     var ids = []
@@ -112,6 +116,43 @@ Item {
     }
     mutationQueue = next
     startNextMutation()
+  }
+
+  function createWorkspace(cwd) {
+    if (!running || state !== "ready") return "Herdr is not ready"
+    if (workspaceCreateWanted) return "workspace creation already in progress"
+
+    workspaceCreateRequest = {
+      id: "hypr-herdr:workspace-create:" + (++requestSequence),
+      method: "workspace.create",
+      params: {
+        cwd: String(cwd || ""),
+        focus: false
+      }
+    }
+    workspaceCreateWanted = true
+    return "requested"
+  }
+
+  function handleWorkspaceCreateLine(line) {
+    var message = null
+    try { message = JSON.parse(String(line || "")) } catch (error) {}
+    if (!message || message.error) {
+      var detail = message && message.error
+        ? String(message.error.message || "workspace creation failed")
+        : "Herdr returned an invalid workspace creation response"
+      workspaceCreateWanted = false
+      workspaceCreateRequest = ({})
+      workspaceCreateFailed(detail)
+      return
+    }
+
+    var result = message.result || {}
+    var workspace = result.workspace || result.workspace_info || {}
+    var workspaceId = String(workspace.workspace_id || workspace.id || result.workspace_id || "")
+    workspaceCreateWanted = false
+    workspaceCreateRequest = ({})
+    workspaceCreated(workspaceId)
   }
 
   function startNextMutation() {
@@ -318,6 +359,27 @@ Item {
     parser: SplitParser {
       splitMarker: "\n"
       onRead: function(line) { root.handleMutationLine(line) }
+    }
+  }
+
+  Socket {
+    id: workspaceCreateSocket
+    path: root.socketPath
+    connected: root.running && root.workspaceCreateWanted
+
+    onConnectionStateChanged: if (connected) {
+      write(JSON.stringify(root.workspaceCreateRequest) + "\n")
+      flush()
+    }
+    onError: function(error) {
+      root.workspaceCreateWanted = false
+      root.workspaceCreateRequest = ({})
+      root.workspaceCreateFailed("Cannot create a Herdr workspace at " + root.socketPath)
+    }
+
+    parser: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) { root.handleWorkspaceCreateLine(line) }
     }
   }
 

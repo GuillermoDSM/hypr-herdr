@@ -18,12 +18,20 @@ Item {
   property string lastSpaceId: ""
   property real sidebarWidthRatio: 0.22
   property bool settingsLoaded: false
+  property bool emptyEntryRequested: false
+  property bool creatingSpace: false
+  property string pendingCreatedSpaceId: ""
+  property bool creationOpenRequested: false
+  property var creationWorkspaceIds: []
+  property string createSpaceError: ""
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "guillermodsm.hypr-herdr"
   readonly property string focusedWorkspaceName: Hyprland.focusedWorkspace
     ? String((Hyprland.focusedWorkspace.lastIpcObject || {}).name || Hyprland.focusedWorkspace.name || "")
     : ""
   readonly property bool onHerdrWorkspace: spaceIdForWorkspace(focusedWorkspaceName) !== ""
+  readonly property bool emptyEntryVisible: emptyEntryRequested
+    && client.state === "ready" && client.workspaces.length === 0
   readonly property var selectedSpace: spaceById(selectedSpaceId)
   readonly property color foreground: Color.popups.text
   readonly property color dim: Util.alpha(Color.popups.text, 0.65)
@@ -39,6 +47,7 @@ Item {
 
   function open(payloadJson) {
     opened = true
+    if (client.workspaces.length === 0) emptyEntryRequested = true
     var payload = null
     try { payload = JSON.parse(String(payloadJson || "{}")) } catch (error) {}
     if (payload && payload.spaceId) openSpace(String(payload.spaceId))
@@ -185,6 +194,7 @@ Item {
     var value = String(id || "")
     if (!spaceById(value)) return "unknown space: " + value
     opened = true
+    emptyEntryRequested = false
     selectedSpaceId = value
     lastSpaceId = value
     if (!workspaceManager.spaceReady(value)) return workspaceManager.prepareSpace(value)
@@ -197,9 +207,140 @@ Item {
     if (!spaceById(target)) target = client.focusedWorkspaceId
     if (!spaceById(target) && client.workspaces.length > 0)
       target = String(client.workspaces[0].workspace_id || "")
-    if (target === "") return "no Herdr spaces"
+    if (target === "") {
+      emptyEntryRequested = true
+      return "no Herdr spaces"
+    }
+    emptyEntryRequested = false
     if (!workspaceManager.spaceReady(target)) return workspaceManager.prepareSpace(target)
     return lease.toggle(target)
+  }
+
+  function currentCwd() {
+    var preferredSpaceId = selectedSpaceId !== "" ? selectedSpaceId : client.focusedWorkspaceId
+    for (var i = 0; i < client.panes.length; i++) {
+      var focusedPane = client.panes[i]
+      if (String(focusedPane.pane_id || "") === client.focusedPaneId) {
+        var focusedCwd = String(focusedPane.cwd || focusedPane.foreground_cwd || "")
+        if (focusedCwd !== "") return focusedCwd
+        break
+      }
+    }
+
+    for (var i = 0; i < client.panes.length; i++) {
+      var pane = client.panes[i]
+      var paneCwd = String(pane.cwd || pane.foreground_cwd || "")
+      if (paneCwd === "") continue
+      if (String(pane.workspace_id || "") === preferredSpaceId) return paneCwd
+    }
+    return Quickshell.env("HOME") || "/"
+  }
+
+  function workspaceIds() {
+    var result = []
+    for (var i = 0; i < client.workspaces.length; i++) {
+      var id = String(client.workspaces[i].workspace_id || "")
+      if (id !== "") result.push(id)
+    }
+    return result
+  }
+
+  function createSpace() {
+    if (creatingSpace) return "workspace creation already in progress"
+    if (client.state !== "ready") return "Herdr is not ready"
+    if (lease.busy) return "workspace transaction already in progress"
+    if (lease.recoveryRequired) return "workspace recovery required"
+
+    creatingSpace = true
+    pendingCreatedSpaceId = ""
+    creationOpenRequested = false
+    creationWorkspaceIds = workspaceIds()
+    createSpaceError = ""
+    opened = true
+
+    var result = client.createWorkspace(currentCwd())
+    if (result !== "requested") {
+      failCreateSpace(result)
+      return result
+    }
+    return result
+  }
+
+  function failCreateSpace(message) {
+    creatingSpace = false
+    pendingCreatedSpaceId = ""
+    creationOpenRequested = false
+    creationWorkspaceIds = []
+    createSpaceError = String(message || "workspace creation failed")
+    return createSpaceError
+  }
+
+  function finishCreateSpace() {
+    creatingSpace = false
+    pendingCreatedSpaceId = ""
+    creationOpenRequested = false
+    creationWorkspaceIds = []
+    createSpaceError = ""
+    emptyEntryRequested = false
+  }
+
+  function handleWorkspaceCreated(id) {
+    if (!creatingSpace) return
+    pendingCreatedSpaceId = String(id || "")
+    client.requestSnapshot()
+  }
+
+  function handleCreateSnapshot() {
+    if (!creatingSpace) return
+
+    var createdId = pendingCreatedSpaceId
+    if (createdId === "") {
+      var knownIds = creationWorkspaceIds
+      for (var i = 0; i < client.workspaces.length; i++) {
+        var candidate = String(client.workspaces[i].workspace_id || "")
+        if (candidate !== "" && knownIds.indexOf(candidate) === -1) {
+          createdId = candidate
+          break
+        }
+      }
+      if (createdId !== "") pendingCreatedSpaceId = createdId
+    }
+
+    if (createdId === "") {
+      client.requestSnapshot()
+      return
+    }
+    if (!spaceById(createdId)) {
+      client.requestSnapshot()
+      return
+    }
+
+    selectedSpaceId = createdId
+    lastSpaceId = createdId
+    emptyEntryRequested = false
+    workspaceManager.prepareSpace(createdId)
+    maybeOpenCreatedSpace()
+  }
+
+  function maybeOpenCreatedSpace() {
+    if (!creatingSpace || pendingCreatedSpaceId === "" || creationOpenRequested) return
+    if (workspaceManager.state === "error") {
+      failCreateSpace(workspaceManager.errorMessage || "workspace preparation failed")
+      return
+    }
+    if (!workspaceManager.spaceReady(pendingCreatedSpaceId)) {
+      workspaceManager.prepareSpace(pendingCreatedSpaceId)
+      return
+    }
+
+    creationOpenRequested = true
+    var result = lease.openSpace(pendingCreatedSpaceId)
+    if (result === "preparing") {
+      creationOpenRequested = false
+      workspaceManager.prepareSpace(pendingCreatedSpaceId)
+    } else if (result !== "requested") {
+      failCreateSpace(result)
+    }
   }
 
   function releaseLease() {
@@ -242,6 +383,11 @@ Item {
         unavailablePanes: workspaceManager.unavailablePaneCount,
         pendingPaneId: workspaceManager.pendingPaneId
       },
+      creation: {
+        pending: creatingSpace,
+        spaceId: pendingCreatedSpaceId,
+        error: createSpaceError
+      },
       layout: {
         state: workspaceManager.layoutState,
         error: workspaceManager.layoutErrorMessage,
@@ -280,7 +426,10 @@ Item {
           : (workspaces.length > 0 ? String(workspaces[0].workspace_id || "") : "")
       }
       root.syncFocusedWorkspace()
+      root.handleCreateSnapshot()
     }
+    onWorkspaceCreated: function(workspaceId) { root.handleWorkspaceCreated(workspaceId) }
+    onWorkspaceCreateFailed: function(message) { root.failCreateSpace(message) }
   }
 
   FileView {
@@ -296,6 +445,13 @@ Item {
   WorkspaceLease {
     id: lease
     onOperationFinished: function(operation, success, message) {
+      if (root.creatingSpace && root.creationOpenRequested && operation !== "release") {
+        if (!success) {
+          root.failCreateSpace(message)
+          return
+        }
+        root.finishCreateSpace()
+      }
       if (!success) return
       if (operation !== "release") {
         root.selectedSpaceId = ownerSpaceId
@@ -315,6 +471,13 @@ Item {
     layoutWriteBusy: client.mutationWanted || client.mutationQueue.length > 0
     leaseCoordinator: lease
     onLayoutRatioUpdates: function(updates) { client.setLayoutRatios(updates) }
+    onReconciliationComplete: root.maybeOpenCreatedSpace()
+    onStateChanged: {
+      if (root.creatingSpace && state === "error")
+        root.failCreateSpace(errorMessage || "workspace preparation failed")
+      else
+        root.maybeOpenCreatedSpace()
+    }
   }
 
   IpcHandler {
@@ -328,12 +491,16 @@ Item {
     function status(): string { return root.statusJson() }
     function reconcile(): string { client.requestSnapshot(); return "requested" }
     function close(): void { root.requestClose() }
-    function show(): void { root.opened = true }
+    function show(): void {
+      root.opened = true
+      if (client.state === "ready" && client.workspaces.length === 0)
+        root.emptyEntryRequested = true
+    }
   }
 
   PanelWindow {
     id: sidebar
-    visible: root.opened && root.onHerdrWorkspace
+    visible: root.opened && (root.onHerdrWorkspace || root.emptyEntryVisible || root.creatingSpace)
     anchors { top: true; bottom: true; left: true }
     // At fractional scales (e.g. 1.25) the bar/sidebar boundary lands on a half
     // device pixel, so rounding can leave a 1px seam exposing the wallpaper
@@ -390,222 +557,236 @@ Item {
       anchors.bottomMargin: Style.space(16)
       anchors.leftMargin: Style.space(16)
       anchors.rightMargin: Style.space(20)
-      spacing: Style.space(14)
-
-      Item {
-        width: parent.width
-        height: Math.max(titleColumn.implicitHeight, connectionDot.height)
-
-        Column {
-          id: titleColumn
-          anchors.left: parent.left
-          anchors.right: connectionDot.left
-          anchors.rightMargin: Style.space(12)
-          spacing: Style.space(2)
-
-          Text {
-            text: "HERDR"
-            color: root.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.heading
-            font.bold: true
-            font.letterSpacing: 2
-          }
-
-          Text {
-            width: parent.width
-            text: client.state === "ready"
-              ? client.workspaces.length + " spaces · " + client.panes.length + " panes · "
-                + workspaceManager.state
-                + (workspaceManager.unavailablePaneCount > 0
-                  ? " (" + workspaceManager.unavailablePaneCount + " unavailable)" : "")
-              : client.state
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
-        }
-
-        Rectangle {
-          id: connectionDot
-          anchors.right: parent.right
-          anchors.top: parent.top
-          anchors.topMargin: Style.space(7)
-          width: Style.space(8)
-          height: width
-          radius: width / 2
-          color: client.state === "ready" ? Color.accent : Color.urgent
-        }
-      }
-
+      spacing: Style.space(10)
       Text {
-        visible: client.errorMessage !== ""
+        id: sidebarError
+        visible: client.errorMessage !== "" || root.createSpaceError !== ""
         width: parent.width
-        text: client.errorMessage
+        height: visible ? implicitHeight : 0
+        text: client.errorMessage !== "" ? client.errorMessage : root.createSpaceError
         color: Color.urgent
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
       }
 
-      Text {
+      Item {
+        id: sections
         width: parent.width
-        text: "SPACES"
-        color: root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        font.bold: true
-        font.letterSpacing: 1
-      }
+        height: Math.max(0, parent.height - y)
 
-      Flickable {
-        width: parent.width
-        height: Math.min(spacesColumn.implicitHeight, Math.max(Style.space(96), sidebar.height * 0.32))
-        contentWidth: width
-        contentHeight: spacesColumn.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-
-        Column {
-          id: spacesColumn
+        Item {
+          id: spacesSection
           width: parent.width
-          spacing: Style.space(4)
+          height: Math.max(0, Math.floor((sections.height - Style.space(1)) / 2))
 
-          Repeater {
-            model: client.workspaces
+          Column {
+            anchors.fill: parent
+            spacing: Style.space(4)
+
+            Text {
+              id: spacesHeading
+              width: parent.width
+              text: "SPACES"
+              color: root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1
+            }
+
+            Flickable {
+              width: parent.width
+              height: Math.max(0, spacesSection.height - spacesHeading.implicitHeight
+                - newSpaceButton.implicitHeight - Style.space(8))
+              contentWidth: width
+              contentHeight: spacesColumn.implicitHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+
+              Column {
+                id: spacesColumn
+                width: parent.width
+                spacing: Style.space(2)
+
+                Repeater {
+                  model: client.workspaces
+
+                  Button {
+                    required property var modelData
+                    width: spacesColumn.width
+                    text: String(modelData.label || modelData.workspace_id || "Space")
+                    iconText: modelData.focused ? "●" : ""
+                    leftAlign: true
+                    selected: String(modelData.workspace_id || "") === root.selectedSpaceId
+                    foreground: root.foreground
+                    fontSize: Style.font.bodySmall
+                    iconSize: Style.font.caption
+                    verticalPadding: Style.space(3)
+                    onClicked: root.openSpace(String(modelData.workspace_id || ""))
+                  }
+                }
+
+                Text {
+                  visible: client.state === "ready" && client.workspaces.length === 0
+                  width: parent.width
+                  text: "No spaces yet."
+                  color: root.dim
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                }
+              }
+            }
 
             Button {
-              required property var modelData
-              width: spacesColumn.width
-              text: String(modelData.label || modelData.workspace_id || "Space")
-              iconText: modelData.focused ? "●" : ""
+              id: newSpaceButton
+              width: parent.width
+              text: root.creatingSpace ? "creating..." : "new"
               leftAlign: true
-              selected: String(modelData.workspace_id || "") === root.selectedSpaceId
               foreground: root.foreground
-              onClicked: root.openSpace(String(modelData.workspace_id || ""))
+              fontSize: Style.font.bodySmall
+              verticalPadding: Style.space(3)
+              enabled: !root.creatingSpace && client.state === "ready"
+                && !lease.busy && !lease.recoveryRequired
+              onClicked: root.createSpace()
             }
           }
         }
-      }
 
-      Rectangle {
-        width: parent.width
-        height: 1
-        color: Util.alpha(root.foreground, 0.16)
-      }
-
-
-      Item {
-        width: parent.width
-        height: agentsHeading.implicitHeight
-
-        Text {
-          id: agentsHeading
-          anchors.left: parent.left
-          text: "AGENTS"
-          color: root.dim
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          font.letterSpacing: 1
-        }
-
-        Text {
-          anchors.right: parent.right
-          anchors.baseline: agentsHeading.baseline
-          text: String(client.agents.length)
-          color: root.dim
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-        }
-      }
-
-      Flickable {
-        width: parent.width
-        height: Math.max(0, sidebar.height - y - Style.space(16))
-        contentWidth: width
-        contentHeight: agentsColumn.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-
-        Column {
-          id: agentsColumn
+        Rectangle {
+          id: sectionsDivider
+          anchors.top: spacesSection.bottom
           width: parent.width
-          spacing: Style.space(4)
+          height: 1
+          color: Util.alpha(root.foreground, 0.16)
+        }
 
-          Repeater {
-            model: root.sortedAgents()
+        Item {
+          id: agentsSection
+          anchors.top: sectionsDivider.bottom
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
 
-            Rectangle {
-              id: agentRow
-              required property var modelData
-              readonly property bool selected: String(modelData.pane_id || "") === client.focusedPaneId
-              width: agentsColumn.width
-              height: Style.space(46)
-              radius: Style.cornerRadius
-              color: selected || agentMouse.containsMouse
-                ? Style.selectedFillFor(root.foreground, Color.accent)
-                : "transparent"
+          Column {
+            anchors.fill: parent
+            spacing: Style.space(4)
+
+            Item {
+              id: agentsHeader
+              width: parent.width
+              height: agentsHeading.implicitHeight
 
               Text {
-                id: agentStatus
+                id: agentsHeading
                 anchors.left: parent.left
-                anchors.leftMargin: Style.space(10)
-                anchors.top: parent.top
-                anchors.topMargin: Style.space(7)
-                text: root.statusSymbol(agentRow.modelData.agent_status)
-                color: root.statusColor(agentRow.modelData.agent_status)
+                text: "AGENTS"
+                color: root.dim
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              Text {
+                anchors.right: parent.right
+                anchors.baseline: agentsHeading.baseline
+                text: String(client.agents.length)
+                color: root.dim
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
               }
+            }
+
+            Flickable {
+              width: parent.width
+              height: Math.max(0, agentsSection.height - agentsHeader.height - Style.space(4))
+              contentWidth: width
+              contentHeight: agentsColumn.implicitHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
 
               Column {
-                anchors.left: agentStatus.right
-                anchors.leftMargin: Style.space(8)
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
+                id: agentsColumn
+                width: parent.width
+                spacing: Style.space(2)
+
+                Repeater {
+                  model: root.sortedAgents()
+
+                  Rectangle {
+                    id: agentRow
+                    required property var modelData
+                    readonly property bool selected: String(modelData.pane_id || "") === client.focusedPaneId
+                    width: agentsColumn.width
+                    height: Style.space(36)
+                    radius: Style.cornerRadius
+                    color: selected || agentMouse.containsMouse
+                      ? Style.selectedFillFor(root.foreground, Color.accent)
+                      : "transparent"
+
+                    Text {
+                      id: agentStatus
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(8)
+                      anchors.top: parent.top
+                      anchors.topMargin: Style.space(5)
+                      text: root.statusSymbol(agentRow.modelData.agent_status)
+                      color: root.statusColor(agentRow.modelData.agent_status)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Column {
+                      anchors.left: agentStatus.right
+                      anchors.leftMargin: Style.space(6)
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(8)
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: 0
+
+                      Text {
+                        width: parent.width
+                        text: root.agentLocation(agentRow.modelData)
+                        color: root.foreground
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        font.bold: true
+                        elide: Text.ElideRight
+                      }
+
+                      Text {
+                        width: parent.width
+                        text: root.agentName(agentRow.modelData)
+                        color: root.dim
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
+                    }
+
+                    MouseArea {
+                      id: agentMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      enabled: String(agentRow.modelData.terminal_id || "") !== ""
+                      onClicked: root.focusPane(String(agentRow.modelData.pane_id || ""))
+                    }
+                  }
+                }
 
                 Text {
+                  visible: client.state === "ready" && client.agents.length === 0
                   width: parent.width
-                  text: root.agentLocation(agentRow.modelData)
+                  text: "No agents are running."
                   color: root.dim
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
-
-                Text {
-                  width: parent.width
-                  text: root.agentName(agentRow.modelData)
-                  color: root.foreground
-                  font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideRight
+                  wrapMode: Text.WordWrap
                 }
-              }
-
-              MouseArea {
-                id: agentMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                enabled: String(agentRow.modelData.terminal_id || "") !== ""
-                onClicked: root.focusPane(String(agentRow.modelData.pane_id || ""))
               }
             }
-          }
-
-          Text {
-            visible: client.state === "ready" && client.agents.length === 0
-            width: parent.width
-            text: "No agents are running."
-            color: root.dim
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
           }
         }
       }

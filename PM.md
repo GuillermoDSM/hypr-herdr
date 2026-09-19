@@ -2,6 +2,25 @@
 
 Estados: `[x]` hecho, `[ ]` pendiente.
 
+## Estado actual
+
+- Estado: **vertical slice operativa, todavía no release v0.1**.
+- Runtime validado con Herdr 0.9.1/protocolo 22: 6 spaces, 6 tabs, 11 panes, 6 agentes y 11 terminales adjuntas.
+- `openLast`/`release` y el lease global están operativos; la última comprobación dejó el plugin en `ready`, con preparación `11/11` y un lease activo.
+- Layout BSP de Hyprland y ratios de Herdr sincronizados; el caso `wW` conserva PIDs, PTY y proporciones.
+- Sidebar validado con contraste WCAG, mínimo de 160 unidades lógicas y solape anti-franja para escalas fraccionarias.
+- Attach aislado implementado mediante `HERDR_CONFIG_PATH`; la configuración global de Herdr no se modifica.
+- La implementación funcional está publicada en la rama principal; esta revisión actualiza su documentación.
+- Validaciones actuales: manifiesto, qmllint, smoke de Herdr, panel, leases, workspaces y `AttachConfigSmoke`.
+
+## Próximos pasos priorizados
+
+- [ ] Recrear explícitamente los sockets de `HerdrClient` después de reiniciar `herdr server` y eliminar la necesidad de reiniciar `omarchy-shell`.
+- [ ] Completar y probar recuperación de transacciones parciales, leases existentes y panes después de reinicios.
+- [ ] Validar manualmente selección, arrastre y click derecho en una terminal normal con el attach aislado.
+- [ ] Documentar el comportamiento de OpenCode y otras aplicaciones que solicitan mouse reporting propio.
+- [ ] Ejecutar la matriz final de aceptación con varios estados de agentes, terminales, monitores y ventanas especiales antes de declarar v0.1.
+
 ## Backlog
 
 - US-B01: Un arriendo independiente por monitor.
@@ -9,6 +28,8 @@ Estados: `[x]` hecho, `[ ]` pendiente.
 - US-B03: Restaurar geometría de una terminal cerrada manualmente.
 - US-B04: Sincronizar sesiones Herdr remotas.
 - US-B05: Hibernación y límites de recursos para agentes.
+- US-B06: Reconectar sockets automáticamente después de reiniciar el servidor Herdr.
+- US-B07: Validar y documentar mouse nativo frente a mouse reporting de cada aplicación.
 
 ## Sprint 0 - Base actual
 
@@ -46,6 +67,8 @@ Estados: `[x]` hecho, `[ ]` pendiente.
 - [x] Pasar `qmllint`.
 - [x] Pasar smoke test del cliente contra Herdr.
 - [x] Pasar smoke test del panel.
+- [x] Pasar smoke tests de lease coordinator, repetición del lease y workspace manager.
+- [x] Pasar smoke test de generación de configuración aislada para attach.
 
 ## Sprint 1 - Spike de Slot Leasing
 
@@ -144,7 +167,25 @@ Estado: **completado**.
 - [x] Exponer estados `preparing` y `ready`.
 - [x] Evitar procesos, polling y escrituras durante un switch.
 
+### US-304 - Sincronización de layout
+
+- [x] Leer la geometría BSP de las ventanas gestionadas desde Hyprland.
+- [x] Traducir splits a rutas y ratios de `layout.set_split_ratio`.
+- [x] Persistir la firma inicial de panes para no reescribir layouts sin cambios.
+- [x] Verificar sincronización inicial e inversa en un workspace con tres panes.
+
+### US-305 - Attach y mouse aislado
+
+- [x] Generar `hypr-herdr-attach.toml` en el estado de Quickshell.
+- [x] Lanzar cada attach con `HERDR_CONFIG_PATH` sin tocar la configuración global.
+- [x] Mantener compatibilidad explícita con protocolos Herdr 20 y 22.
+- [x] Cubrir la generación TOML con `AttachConfigSmoke`.
+- [ ] Validar manualmente selección, arrastre y click derecho en una terminal normal.
+- [ ] Documentar el comportamiento de aplicaciones con mouse reporting propio.
+
 ## Sprint 4 - Recuperación
+
+Estado: **parcialmente completado**. La reconstrucción básica por nombres/IDs y el bloqueo de mutaciones ante recovery existen; la recuperación completa tras fallos externos sigue pendiente.
 
 ### US-401 - Adopción al arrancar
 
@@ -163,9 +204,16 @@ Estado: **completado**.
 
 ### US-403 - Fallos externos
 
+- [x] Mostrar desconexión y conservar el último estado conocido cuando falla el socket.
 - [ ] Permitir release cuando Herdr está desconectado.
 - [ ] Recuperar tras reiniciar Herdr.
 - [ ] Manejar pane sin `terminal_id` y terminal que falla al iniciar.
+
+### US-404 - Ciclo de vida de sockets
+
+- [ ] Recrear explícitamente los sockets de `HerdrClient` después de un error de conexión.
+- [ ] Evitar que un `herdr server stop`/start deje el plugin en `connecting` o `incompatible` hasta reiniciar el shell.
+- [ ] Añadir una prueba de reinicio del servidor con snapshot, eventos y reconciliación posterior.
 
 ## Sprint 5 - Release v0.1
 
@@ -194,6 +242,20 @@ Estado: **completado**.
 - [x] Documentar detach como `release` y el plugin como siempre cargado.
 - [x] Conservar el inventario `app-id`/`terminal_id` durante hot reload y cancelar operaciones transitorias al desactivar el manager.
 
+### US-504 - Sidebar compacto y creación de spaces
+
+- [x] Eliminar del sidebar el título `HERDR` y el resumen visual de spaces/panes, conservando esos datos en `status` para diagnóstico.
+- [x] Reducir la altura, padding y separación de los botones de spaces.
+- [x] Reservar la mitad inferior del sidebar para la lista global de agents y compactar sus filas.
+- [x] Mostrar el nombre del proyecto (`workspace.label`) con mayor contraste que el nombre del agent.
+- [x] Añadir el botón `New` debajo de spaces, fuera del `Flickable`, para que permanezca visible.
+- [x] Crear el nuevo space mediante `workspace.create` de la API de Herdr, usando el `cwd` actual y `HOME` como fallback.
+- [x] Esperar el snapshot y la reconciliación del pane antes de seleccionar, enfocar y abrir el nuevo space.
+- [x] Evitar doble creación, mostrar errores y mantener el flujo disponible cuando todavía no existen spaces.
+- [x] Añadir pruebas de layout, compactación, contraste y creación en una sesión Herdr desechable.
+
+**Technical notes:** `Panel.qml` concentra el layout del sidebar y mantiene la operación `New` pendiente hasta que `HerdrClient` confirma el workspace y `WorkspaceManager` reconcilia su pane. `HerdrClient` usa un socket de comando separado para `workspace.create`; la terminal se abre mediante el pane creado por Herdr y la reconciliación existente, sin lanzar una terminal independiente.
+
 **Technical notes:** un symlink en `~/.config/omarchy/plugins/` no recibe hot reload porque el watcher del shell usa `inotifywait -r`, que no atraviesa symlinks. El checkout se sincroniza con `rsync` a un directorio real y `watch` repite la sincronización en cada guardado. `disable` se rechaza si hay un arriendo activo.
 
 **Technical notes:** el modelo de `Hyprland.workspaces` conserva objetos obsoletos tras `change_id` (Quickshell ignora `changeworkspaceid` y `Hyprland.refreshWorkspaces()` no crea ni elimina objetos), así que el lease decide sobre `hyprctl -j workspaces` y `hyprctl -j activeworkspace` con una caché refrescada por eventos. `tests/lease-repeat-smoke.sh` cubre adquirir, liberar y volver a adquirir reutilizando el mismo parked.
@@ -201,3 +263,7 @@ Estado: **completado**.
 **Technical notes:** `Color.muted` es un tono de superficie en varios temas (1.59:1 sobre el fondo actual), así que el sidebar no lo usa para texto: el secundario es `Util.alpha(Color.popups.text, 0.65)` (7.62:1 con el tema hackerman) y los estados `idle`/`unknown` usan 0.65/0.5. `tests/PanelSmoke.qml` verifica contraste WCAG ≥ 4.5:1 para texto y ≥ 3:1 para glifos de estado.
 
 **Technical notes:** el mínimo del sidebar es `Style.space(160)` y los límites se aplican en píxeles; ya no hay piso de ratio fijo, así que arrastrar hasta el mínimo funciona en cualquier monitor. A escala 1.25 el borde bar/sidebar cae en 32.5 px físicos y el redondeo deja una franja de 1 px; el sidebar solapa una unidad lógica con `margins.top/bottom: -1` (verificado en `hyprctl -j layers`: `y` pasa de 26 a 25 y la reserva no cambia).
+
+**Technical notes:** Herdr 0.9.1 usa protocolo 22 y la suite lo valida; el cliente también conserva compatibilidad explícita con protocolo 20. La versión actual de `AttachConfig.js` genera una copia por ventana y respeta una configuración `mouse_capture` explícita del usuario; la validación manual de mouse sigue pendiente.
+
+**Technical notes:** el estado operativo validado en local es `ready`, con 6 workspaces, 11 panes y 11 terminales adjuntas. El estado no constituye todavía la aceptación completa de v0.1: falta validar reconexión tras reiniciar Herdr y la matriz completa de terminales, agentes, monitores y recuperación.
